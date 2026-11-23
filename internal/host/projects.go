@@ -74,15 +74,30 @@ func (h *Host) listProjects(w http.ResponseWriter, _ *http.Request, _ Params) {
 
 var slugBad = regexp.MustCompile(`[^a-z0-9]+`)
 
-// folderFor picks a new folder under ProjectsDir for name.
-func (h *Host) folderFor(name string) (string, error) {
-	slug := strings.Trim(slugBad.ReplaceAllString(strings.ToLower(name), "-"), "-")
+// cyrLatin transliterates Cyrillic so a Russian project name gets a readable folder ("Кофейня Зерно" →
+// kofeynya-zerno) instead of the bare fallback "project".
+var cyrLatin = strings.NewReplacer(
+	"а", "a", "б", "b", "в", "v", "г", "g", "д", "d", "е", "e", "ё", "e", "ж", "zh", "з", "z", "и", "i", "й", "y",
+	"к", "k", "л", "l", "м", "m", "н", "n", "о", "o", "п", "p", "р", "r", "с", "s", "т", "t", "у", "u", "ф", "f",
+	"х", "kh", "ц", "ts", "ч", "ch", "ш", "sh", "щ", "shch", "ъ", "", "ы", "y", "ь", "", "э", "e", "ю", "yu", "я", "ya",
+	"і", "i", "ї", "yi", "є", "ye", "ґ", "g",
+)
+
+// projectSlug is the folder name for a project name: lower-case ASCII words joined by "-", at most 40 bytes.
+func projectSlug(name string) string {
+	slug := strings.Trim(slugBad.ReplaceAllString(cyrLatin.Replace(strings.ToLower(name)), "-"), "-")
 	if slug == "" {
 		slug = "project"
 	}
 	if len(slug) > 40 {
-		slug = slug[:40]
+		slug = strings.TrimRight(slug[:40], "-")
 	}
+	return slug
+}
+
+// folderFor picks a new folder under ProjectsDir for name.
+func (h *Host) folderFor(name string) (string, error) {
+	slug := projectSlug(name)
 	if err := os.MkdirAll(h.opts.ProjectsDir, 0o755); err != nil {
 		return "", err
 	}
