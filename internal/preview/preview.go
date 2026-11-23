@@ -165,6 +165,7 @@ func (m *Manager) Ensure(id, dir string, p templates.Profile) (host.PreviewStatu
 		ln.Close()
 		return host.PreviewStatus{}, fmt.Errorf("start %s: %v", argv[0], err)
 	}
+	procgroup.Attach(cmd)
 	s := &server{
 		id: id, cmd: cmd, done: make(chan struct{}), devPort: devPort, ln: ln, out: out,
 		origin: "http://127.0.0.1:" + strconv.Itoa(proxyPort), session: randomHex(24), status: "starting",

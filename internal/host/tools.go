@@ -26,6 +26,7 @@ func runToolOutput(ctx context.Context, dir string, argv []string, env []string,
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	procgroup.Attach(cmd)
 	done := make(chan struct{})
 	var werr error
 	go func() { werr = cmd.Wait(); close(done) }()

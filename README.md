@@ -50,7 +50,8 @@ Nothing in the submodule is edited here; a Studio change reaches the desktop app
 ### Live preview
 
 - Play starts the project's dev server (`bun x vite --host 127.0.0.1 --port <port> --strictPort`) in its own process
-  group, after the host-side `bun install`. Stop, deleting the project and quitting the app stop the whole group.
+  group (on Windows also a Job Object with kill-on-close, so the tree dies with the app), after the host-side
+  `bun install`. Stop, deleting the project and quitting the app stop the whole group.
 - The Studio iframe opens a separate loopback origin, `http://127.0.0.1:<proxy port>` (`internal/preview`), never
   the dev server directly. The host mints a one-time grant (`?__buildy_grant=…`, 60 s); the proxy also lets through
   requests with its session cookie or that the browser marks as coming from the preview itself (Sec-Fetch-Site

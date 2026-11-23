@@ -75,6 +75,7 @@ func Start(ctx context.Context, o StartOptions) (*Process, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	procgroup.Attach(cmd)
 	p := &Process{cmd: cmd, done: make(chan struct{})}
 	go func() { _ = cmd.Wait(); close(p.done) }()
 

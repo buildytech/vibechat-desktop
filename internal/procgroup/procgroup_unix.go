@@ -17,3 +17,6 @@ func prepare(cmd *exec.Cmd) {
 func terminateGroup(cmd *exec.Cmd) { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
 
 func killGroup(cmd *exec.Cmd) { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+
+// attach: on Unix the group is set at fork (Setpgid), nothing to do after Start.
+func attach(*exec.Cmd) {}
