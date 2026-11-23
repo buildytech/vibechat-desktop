@@ -4,12 +4,14 @@
 //	vibechat              open the app
 //	vibechat --set-key    read the Cursor API key from stdin and keep it in the OS keychain (never pass it in argv)
 //	vibechat --forget-key remove it from the keychain
+//	vibechat --hook <ev>  the agent's permission hook (stdin JSON → stdout JSON), installed by the host itself
 package main
 
 import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -19,11 +21,18 @@ import (
 	vibechat "github.com/buildytech/vibechat-desktop"
 	"github.com/buildytech/vibechat-desktop/internal/appid"
 	"github.com/buildytech/vibechat-desktop/internal/host"
+	"github.com/buildytech/vibechat-desktop/internal/sandbox"
 	"github.com/buildytech/vibechat-desktop/internal/secrets"
 	"github.com/buildytech/vibechat-desktop/internal/webapp"
 )
 
 func main() {
+	// Hook mode (the agent's preToolUse / beforeReadFile hooks run this binary): answer and exit before anything else.
+	if len(os.Args) == 3 && os.Args[1] == "--hook" {
+		in, _ := io.ReadAll(io.LimitReader(os.Stdin, 4<<20))
+		_, _ = os.Stdout.Write(sandbox.RunHook(os.Args[2], in, os.Getenv))
+		return
+	}
 	setKey := flag.Bool("set-key", false, "read the Cursor API key from stdin and store it in the OS keychain")
 	forgetKey := flag.Bool("forget-key", false, "remove the Cursor API key from the OS keychain")
 	flag.Parse()
@@ -51,7 +60,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	h := host.New(host.Options{Seam: seam, Version: appid.Version})
+	h, closeHost := newHost(seam)
+	defer closeHost()
 
 	app := application.New(application.Options{
 		Name:        appid.Name,
@@ -77,6 +87,7 @@ func main() {
 		UseApplicationMenu: true,
 	})
 	if err := app.Run(); err != nil {
+		closeHost()
 		log.Fatal(err)
 	}
 }

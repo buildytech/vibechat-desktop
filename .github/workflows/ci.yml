@@ -19,9 +19,21 @@ jobs:
       run:
         shell: bash
     steps:
+      # buildytech/vibecode (the submodule) is private: the job's own token cannot read it. The repository secret
+      # VIBECODE_TOKEN (a fine-grained token with read-only Contents on buildytech/vibecode) lets the checkout fetch it.
+      - name: Submodule access
+        env:
+          VIBECODE_TOKEN: ${{ secrets.VIBECODE_TOKEN }}
+        run: |
+          if [ -z "$VIBECODE_TOKEN" ]; then
+            echo "::error::buildytech/vibecode is private. Add the repository secret VIBECODE_TOKEN (fine-grained, read-only Contents on buildytech/vibecode) or make vibecode public."
+            exit 1
+          fi
       - uses: actions/checkout@v4
         with:
           submodules: true
+          token: ${{ secrets.VIBECODE_TOKEN }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

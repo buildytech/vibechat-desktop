@@ -6,7 +6,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 [ "$(git branch --show-current)" = "main" ] || { echo "gate: branch must be main" >&2; exit 1; }
 git submodule update --init third_party/vibecode
 [ -z "$(git -C third_party/vibecode status --porcelain --untracked-files=no)" ] || { echo "gate: third_party/vibecode has local changes" >&2; exit 1; }
-unformatted="$(gofmt -l assets.go cmd internal)"
+unformatted="$(gofmt -l *.go cmd internal)"
 [ -z "$unformatted" ] || { echo "gate: gofmt needed: $unformatted" >&2; exit 1; }
 PKGS="./ ./internal/... ./cmd/..."
 go vet $PKGS
