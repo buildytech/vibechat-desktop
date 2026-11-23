@@ -47,6 +47,16 @@ Nothing in the submodule is edited here; a Studio change reaches the desktop app
   `main` (the project folder, where the preview runs). A conflict leaves the work on the branch and says so. Deleting
   a chat removes its worktree and branch.
 
+### Live preview
+
+- Play starts the project's dev server (`bun x vite --host 127.0.0.1 --port <port> --strictPort`) in its own process
+  group, after the host-side `bun install`. Stop, deleting the project and quitting the app stop the whole group.
+- The Studio iframe opens a separate loopback origin, `http://127.0.0.1:<proxy port>` (`internal/preview`), never
+  the dev server directly. The host mints a one-time grant (`?__buildy_grant=…`, 60 s); the proxy also lets through
+  requests with its session cookie or that the browser marks as coming from the preview itself (Sec-Fetch-Site
+  same-origin / Origin / Referer), checks the Host header, and answers everything else 403.
+- Vite HMR runs over the proxy port (`HMR_CLIENT_PORT`), WebSocket included.
+
 ## Build
 
 Requirements: Go 1.26+, Bun 1.4 (the Studio build), and on Linux `pkg-config libgtk-4-dev libwebkitgtk-6.0-dev`.

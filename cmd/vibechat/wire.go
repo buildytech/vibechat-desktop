@@ -11,6 +11,7 @@ import (
 	"github.com/buildytech/vibechat-desktop/internal/appid"
 	"github.com/buildytech/vibechat-desktop/internal/bridge"
 	"github.com/buildytech/vibechat-desktop/internal/host"
+	"github.com/buildytech/vibechat-desktop/internal/preview"
 	"github.com/buildytech/vibechat-desktop/internal/secrets"
 	"github.com/buildytech/vibechat-desktop/internal/store"
 )
@@ -60,7 +61,7 @@ func newHost(seam host.Seam) (*host.Host, func()) {
 	}
 	h := host.New(host.Options{
 		Seam: seam, Version: appid.Version, Store: st, Agent: runner, Keys: keys, Templates: vibechat.Templates(),
-		ProjectsDir: projects, WorktreesDir: filepath.Join(data, "worktrees"), Log: logf,
+		Preview: preview.New(logf), ProjectsDir: projects, WorktreesDir: filepath.Join(data, "worktrees"), Log: logf,
 	})
 	var once sync.Once
 	return h, func() {
