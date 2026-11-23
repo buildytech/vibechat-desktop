@@ -1,0 +1,63 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    env:
+      # The app version: scripts/package.sh and the desktop build stamp it (internal/appid.Version).
+      VIBECHAT_VERSION: 0.1.0
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Linux GUI libraries (GTK 4, WebKitGTK 6)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
+      - name: Studio from the pinned vibecode submodule
+        run: bash scripts/build-frontend.sh
+      - name: Vet
+        run: go vet ./ ./internal/... ./cmd/...
+      - name: Tests (unit, host seam contract)
+        run: go test -count=1 -v ./ ./internal/... ./cmd/...
+      - name: Headless build (server tag)
+        run: go build -tags server -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat-server ./cmd/vibechat
+      - name: Desktop build
+        run: go build -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat ./cmd/vibechat
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vibechat-${{ matrix.os }}
+          path: bin/
+          retention-days: 7
+      - name: Packaging tools (wails3 CLI of the pinned Wails; NSIS on Windows)
+        run: |
+          go install "github.com/wailsapp/wails/v3/cmd/wails3@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)"
+          if [ "$RUNNER_OS" = "Windows" ] && ! command -v makensis >/dev/null; then
+            choco install nsis -y --no-progress >/dev/null
+            echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
+          fi
+          if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get install -y dpkg-dev file >/dev/null; fi
+      - name: Unsigned installers (scripts/package.sh)
+        run: bash scripts/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vibechat-installer-${{ matrix.os }}
+          path: dist/
+          retention-days: 14

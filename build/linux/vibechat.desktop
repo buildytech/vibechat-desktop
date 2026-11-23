@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Name=BuildY VibeChat
+Comment=Build UI8Kit pages with Grok
+Exec=vibechat
+Terminal=false
+Type=Application
+Icon=vibechat
+Categories=Development;
+StartupWMClass=vibechat

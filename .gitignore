@@ -1,0 +1,7 @@
+/frontend/dist/*
+!/frontend/dist/.gitkeep
+/bin/
+/dist/
+/cmd/vibechat/*.syso
+/vendor-bridge/
+/build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
