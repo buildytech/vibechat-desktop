@@ -1,0 +1,24 @@
+{
+  "$comment": "Pinned agent runtime bundled with VibeChat: the cursor-sdk-bridge standalone build (GitHub release, SHA-256 from its SHA256SUMS.txt) and the SDK platform helper with the sandbox (npm, sha512 integrity). cmd/fetch-bridge downloads and verifies them; scripts/package.sh puts them next to the app.",
+  "bridge": {
+    "version": "1.2.0",
+    "url": "https://github.com/cursor/sdk-bridge/releases/download/v1.2.0/cursor-sdk-bridge-standalone-{platform}.tar.gz",
+    "sha256": {
+      "darwin-arm64": "fa032dbfa7c65be7d6b4b9c828a52116aca0be7c2f06625e833e888844254792",
+      "darwin-x64": "570e78346a41784926f6436fe8fb6e18377557bfc44f6f814bc2cbb2f5020a78",
+      "linux-arm64": "d479dbd50fb100bb0022d18c0eca75b27e8f600d168f1116613782321b6099c9",
+      "linux-x64": "ce3dd35e963c68a79ba6db5879c6ece048aa80cff16312faf9c6b43b9409763a",
+      "win32-x64": "6ac53405c4b915f196b536f599a84301150d2dcac0b442e915cdb1d483a4ed8b"
+    }
+  },
+  "helper": {
+    "version": "1.2.0",
+    "url": "https://registry.npmjs.org/@cursor/sdk-{platform}/-/sdk-{platform}-1.2.0.tgz",
+    "integrity": {
+      "darwin-arm64": "sha512-UkZ/RdxKCpOQ85nRgzSq+g0h+gIw36/lCEvQvomhs5EkSFZW3OwbeEzkAU3UYglZ7t3RNHj3mc5C5cdDtHguvw==",
+      "darwin-x64": "sha512-mJTFdX+qv9dHAm59tT7uq7ci7+BDvFoNk4gdF2zGp9SLULicY+FdFD64p1qLen1bX5Y2soZaX5mWBy7BfObjcg==",
+      "linux-x64": "sha512-ainsGAFtkWTBZrLABp82Hvfv7VB/FxmZHE42qMVotFTRDwOY2iduvhSig910bVxv+kw3S00Srmu/9CxklLwhbw==",
+      "win32-x64": "sha512-p3rkyta6R/nXIukd3/ifJq32otkkGoUi41T2jxnHbPHMhzE2F8OuJQGBVmORuQLMr+bIGGVZmCxertgs4WgzcQ=="
+    }
+  }
+}

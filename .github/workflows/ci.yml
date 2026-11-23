@@ -53,11 +53,6 @@ jobs:
         run: go build -tags server -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat-server ./cmd/vibechat
       - name: Desktop build
         run: go build -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat ./cmd/vibechat
-      - uses: actions/upload-artifact@v4
-        with:
-          name: vibechat-${{ matrix.os }}
-          path: bin/
-          retention-days: 7
       - name: Packaging tools (wails3 CLI of the pinned Wails; NSIS on Windows)
         run: |
           go install "github.com/wailsapp/wails/v3/cmd/wails3@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)"
@@ -68,6 +63,16 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get install -y dpkg-dev file >/dev/null; fi
       - name: Unsigned installers (scripts/package.sh)
         run: bash scripts/package.sh
+      # The bare executable with the agent runtime next to it (bin/bridge: cursor-sdk-bridge + sandbox helper).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vibechat-${{ matrix.os }}
+          path: |
+            bin/vibechat
+            bin/vibechat.exe
+            bin/bridge/
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
           name: vibechat-installer-${{ matrix.os }}

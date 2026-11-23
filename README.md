@@ -80,6 +80,23 @@ curl -s http://127.0.0.1:18120/runtime/v1/host/capabilities
 
 The server build has no auth: never expose it beyond loopback.
 
+The agent needs the runtime next to the binary: `go run ./cmd/fetch-bridge -out bin/bridge` downloads the
+cursor-sdk-bridge build and the SDK sandbox helper pinned in `bridge.lock.json` and verifies their SHA-256 / sha512.
+Without it (or without a working sandbox) the app runs but the agent stays off.
+
+## Installers
+
+`bash scripts/package.sh` (after `scripts/build-frontend.sh`) builds the unsigned installer of the current OS into
+`dist/`, with the agent runtime inside, and leaves the bare executable with `bin/bridge/` next to it:
+
+| OS | Installer | Runtime location |
+|---|---|---|
+| Linux | `vibechat_<version>_amd64.deb` | `/usr/lib/vibechat/bridge` |
+| Windows | `vibechat-amd64-installer.exe` (NSIS) | `<install dir>\bridge` |
+| macOS | `BuildY VibeChat.dmg` (ad-hoc signed `.app`) | `Contents/Resources/bridge` |
+
+CI uploads `vibechat-installer-<os>` (the installer) and `vibechat-<os>` (the bare executable + `bridge/`).
+
 ## Tests and the gate
 
 `bash scripts/gate.sh` before every push to `main` (no `--force`, no `--no-verify`): gofmt, `go vet`, unit tests, the
