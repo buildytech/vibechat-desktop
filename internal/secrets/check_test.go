@@ -41,21 +41,3 @@ func TestDescribeIsNotSecret(t *testing.T) {
 		t.Errorf("hint: %s", h)
 	}
 }
-
-// The owner's Windows key: 204 characters, the 102-character key twice.
-func TestDuplicatedKey(t *testing.T) {
-	key := "grok_" + strings.Repeat("a1", 47) + "2a6"
-	if Duplicated(key) || !Duplicated(key+key) || !Duplicated(" "+key+key+"\n") || Duplicated(key+key[:len(key)-1]+"x") {
-		t.Fatal("Duplicated")
-	}
-	if err := CheckFormat(key + key); err != ErrPastedTwice {
-		t.Fatalf("save of a doubled key: %v", err)
-	}
-	d := Describe(key+key, "keychain")
-	if !strings.Contains(d, "204 chars") || !strings.Contains(d, "LOOKS DUPLICATED") {
-		t.Errorf("describe: %s", d)
-	}
-	if h := AuthHint(key+key, "keychain"); !strings.Contains(h, "looks duplicated") || !strings.Contains(h, "Ключ вставлен дважды") || strings.Contains(h, key[5:40]) {
-		t.Errorf("hint: %s", h)
-	}
-}

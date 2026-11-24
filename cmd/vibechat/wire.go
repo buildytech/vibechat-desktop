@@ -61,9 +61,6 @@ func newHost(seam host.Seam) (*host.Host, func()) {
 	}
 	install, locErr := bridge.Locate(exe, os.Getenv)
 	keys := secrets.Keys{}
-	if key, source := keys.Key(); secrets.Duplicated(key) {
-		log.Printf("WARNING: the stored Cursor key looks duplicated (pasted twice): %s — replace it in Settings", secrets.Describe(key, source))
-	}
 	runner := agent.NewRunner(agent.RunnerOptions{Install: install, Located: locErr, Keys: keys, DataDir: data, HookExe: exe, Log: logf})
 	if err := runner.SandboxError(); err != nil {
 		log.Printf("agent disabled (fail closed): %v", err)
