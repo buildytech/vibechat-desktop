@@ -166,7 +166,11 @@ jobs:
           - macOS: after unzipping, run `xattr -dr com.apple.quarantine "BuildY VibeChat.app"` (or right-click → Open).
           - Windows: SmartScreen may warn — «More info» → «Run anyway».
 
-          Then `vibechat --set-key` (paste the Cursor API key, kept in the OS keychain) or set it in Settings.
+          Projects need [Bun](https://bun.sh) 1.3.3 or newer on PATH (`bun upgrade`). Then `vibechat --set-key` (paste the Cursor
+          API key, kept in the OS keychain) or set it in Settings.
+
+          Log for bug reports: Windows `%APPDATA%\tw.buildy.vibechat\logs\vibechat.log`, macOS
+          `~/Library/Application Support/tw.buildy.vibechat/logs/vibechat.log`, Linux `~/.config/tw.buildy.vibechat/logs/vibechat.log`.
           EOF
       - name: Publish
         env:

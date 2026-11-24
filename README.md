@@ -27,7 +27,11 @@ Portable zips of the latest release (unzip and run; `bridge/` — the agent runt
   `xattr -dr com.apple.quarantine "BuildY VibeChat.app"` (or right-click → Open).
 
 Installers (`.deb`, NSIS `.exe`, `.dmg`) are on the [releases page](https://github.com/buildytech/vibechat-desktop/releases/latest).
-A Cursor API key is needed for the agent: Settings in the app, or `vibechat --set-key`. `vibechat --version` prints the
+Projects need [Bun](https://bun.sh) 1.3.3 or newer on PATH (`bun upgrade`); an older Bun gets a clear «update Bun»
+message. A Cursor API key is needed for the agent: Settings in the app, or `vibechat --set-key`. The app log (bridge
+output included, key redacted) is `%APPDATA%\tw.buildy.vibechat\logs\vibechat.log` on Windows,
+`~/Library/Application Support/tw.buildy.vibechat/logs/vibechat.log` on macOS, `~/.config/tw.buildy.vibechat/logs/vibechat.log`
+on Linux; `vibechat --bridge-smoke` checks that the agent runtime starts. `vibechat --version` prints the
 version. Releases are built by CI from a `v*` tag.
 
 ## How it works
