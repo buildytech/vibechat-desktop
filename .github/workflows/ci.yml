@@ -207,6 +207,9 @@ jobs:
           The key is an API key of type **Cursor** (`grok_…`) from https://grok.com/dashboard/api-keys ("Grok API" `xai-…`
           keys do not work). `vibechat --check-key > check.txt` checks it with Cursor and writes a diagnostic without the key.
 
+          On Windows agents run without the SDK sandbox (cursor-sdk-bridge has no filesystem sandbox on win32); the
+          permission hooks and workspace checks still apply.
+
           Log for bug reports: Windows `%APPDATA%\tw.buildy.vibechat\logs\vibechat.log`, macOS
           `~/Library/Application Support/tw.buildy.vibechat/logs/vibechat.log`, Linux `~/.config/tw.buildy.vibechat/logs/vibechat.log`.
           EOF
