@@ -104,6 +104,26 @@ jobs:
           # 3 = the runner has no SDK sandbox (GitHub Linux runners lack Landlock); the bridge is not started then.
           if [ "$code" = 3 ] && [ "$RUNNER_OS" = Linux ]; then echo "::warning::bridge smoke skipped: no SDK sandbox on this runner"; exit 0; fi
           exit $code
+      # x64 bridges are recompiled on the Bun baseline runtime (cmd/fetch-bridge, bridge.lock.json baselineRuntime):
+      # the upstream build needs AVX2 and dies with 0xC000001D / SIGILL on older CPUs. Static check of the shipped
+      # folder: manifest runtime bun-*-baseline and machine code identical to the pinned baseline Bun.
+      - name: Bridge is the Bun baseline build (x64)
+        if: runner.os != 'macOS'
+        run: |
+          root="$RUNNER_TEMP/Профиль пользователя/Downloads"
+          case "$RUNNER_OS" in
+            Windows) d="$root/vibechat-desktop-windows-x64/bridge" ;;
+            Linux)   d="$root/vibechat-desktop-linux-x64/bridge" ;;
+          esac
+          go run ./cmd/fetch-bridge -verify "$d" -cache "${BRIDGE_CACHE:-.bridge-cache}"
+      # Dynamic check on a CPU without AVX/AVX2: QEMU user mode, -cpu Nehalem-v2, bridge until ready, the sandbox
+      # helper and rg; the upstream AVX2 bridge as the control must hit SIGILL there.
+      - name: Bridge without AVX2 (QEMU -cpu Nehalem-v2, Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y qemu-user >/dev/null
+          root="$RUNNER_TEMP/Профиль пользователя/Downloads"
+          bash scripts/bridge-qemu-smoke.sh "$root/vibechat-desktop-linux-x64/bridge" "${BRIDGE_CACHE:-.bridge-cache}/cursor-sdk-bridge-standalone-linux-x64.tar.gz"
       # The NSIS installer layout (per-machine, Program Files, read-only for the user): the same smoke from there.
       - name: Bridge smoke from the installed app (Windows)
         if: runner.os == 'Windows'
@@ -111,6 +131,7 @@ jobs:
           powershell -NoProfile -Command "Start-Process -FilePath dist\vibechat-amd64-installer.exe -ArgumentList '/S' -Wait"
           exe="/c/Program Files/BuildY/BuildY VibeChat/vibechat.exe"
           ls -la "$(dirname "$exe")" "$(dirname "$exe")/bridge"
+          go run ./cmd/fetch-bridge -verify "$(dirname "$exe")/bridge" -cache "${BRIDGE_CACHE:-.bridge-cache}"
           unset VIBECHAT_DATA_DIR # the real default: %APPDATA%\tw.buildy.vibechat
           set +e
           "$exe" --bridge-smoke > smoke-installed.txt 2>&1
@@ -159,6 +180,9 @@ jobs:
           | Linux x64 | [vibechat-desktop-linux-x64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-linux-x64.zip) | GTK 4 + WebKitGTK 6 (`sudo apt install libgtk-4-1 libwebkitgtk-6.0-4`), Ubuntu 24.04 / Debian 13 or newer |
           | Windows x64 | [vibechat-desktop-windows-x64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-windows-x64.zip) | Windows 10/11 x64 with Microsoft Edge WebView2 (the installer adds it if missing) |
           | macOS Apple Silicon | [vibechat-desktop-macos-arm64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-macos-arm64.zip) | macOS 12+ on M1 or newer |
+
+          x64 builds run on any x86-64 CPU with SSE4.2 (no AVX/AVX2 needed): the agent runtime is compiled on the Bun
+          *baseline* runtime and checked in CI under QEMU `-cpu Nehalem-v2`.
 
           Installers are attached too: `.deb` (Linux), `vibechat-amd64-installer.exe` (Windows), `.dmg` (macOS).
 

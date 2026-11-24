@@ -109,6 +109,13 @@ The server build has no auth: never expose it beyond loopback.
 
 The agent needs the runtime next to the binary: `go run ./cmd/fetch-bridge -out bin/bridge` downloads the
 cursor-sdk-bridge build and the SDK sandbox helper pinned in `bridge.lock.json` and verifies their SHA-256 / sha512.
+On x64 (Linux, Windows, Intel macOS) the upstream bridge needs AVX2 (Bun's default runtime: `0xC000001D` /
+SIGILL on older CPUs), so fetch-bridge takes the JavaScript bundle out of the pinned binary and compiles it again on
+the pinned Bun **baseline** runtime of the same version (`baselineRuntime` in the lock; SSE4.2, no AVX). `go run
+./cmd/fetch-bridge -verify bin/bridge` checks a bridge folder (manifest `runtime: bun-*-baseline`, machine code equal
+to the pinned baseline Bun); `scripts/bridge-qemu-smoke.sh <bridge dir>` runs it under QEMU `-cpu Nehalem-v2` until
+ready (CI does both). An early bridge exit is logged with its decoded exit code (e.g. `0xC000001D
+STATUS_ILLEGAL_INSTRUCTION`) and the last output lines.
 Without it (or without a working sandbox) the app runs but the agent stays off.
 
 ## Installers

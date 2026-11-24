@@ -4,7 +4,11 @@
 //	<out>/manifest.json, <out>/bin/cursor-sdk-bridge[.exe], <out>/proto/...
 //	<out>/bin/node_modules/@cursor/sdk-<platform>/{bin/cursorsandbox[.exe],bin/rg[.exe],vendor/...,package.json}
 //
+// On x64 the bridge is recompiled on the pinned Bun baseline runtime (no AVX2 needed, see baseline.go).
+//
 // Usage: go run ./cmd/fetch-bridge -out bin/bridge [-platform linux-x64] [-cache .bridge-cache]
+//
+//	go run ./cmd/fetch-bridge -verify <bridge dir>   (x64: the bridge runs on the baseline runtime)
 package main
 
 import (
@@ -39,6 +43,13 @@ type lock struct {
 		URL       string            `json:"url"`
 		Integrity map[string]string `json:"integrity"`
 	} `json:"helper"`
+	// Baseline is the Bun runtime the x64 bridges are recompiled on (see baseline.go).
+	Baseline struct {
+		Bun       string            `json:"bun"`
+		URL       string            `json:"url"`
+		Platforms []string          `json:"platforms"`
+		SHA256    map[string]string `json:"sha256"`
+	} `json:"baselineRuntime"`
 }
 
 func platform() string {
@@ -58,6 +69,7 @@ func main() {
 	plat := flag.String("platform", platform(), "bridge platform: linux-x64, darwin-arm64, win32-x64, ...")
 	lockPath := flag.String("lock", "bridge.lock.json", "lock file")
 	cache := flag.String("cache", "", "optional download cache folder")
+	verify := flag.String("verify", "", "only check that the bridge folder runs on the pinned Bun baseline runtime (x64)")
 	flag.Parse()
 	raw, err := os.ReadFile(*lockPath)
 	if err != nil {
@@ -66,6 +78,12 @@ func main() {
 	var l lock
 	if err := json.Unmarshal(raw, &l); err != nil {
 		log.Fatal(err)
+	}
+	if *verify != "" {
+		if err := verifyDir(l, *verify, *cache); err != nil {
+			log.Fatalf("fetch-bridge verify: %v", err)
+		}
+		return
 	}
 	sum, ok := l.Bridge.SHA256[*plat]
 	if !ok {
@@ -94,7 +112,14 @@ func main() {
 	if err := untar(helperTgz, helperDir, "package/"); err != nil {
 		log.Fatalf("helper: %v", err)
 	}
-	fmt.Printf("fetch-bridge: cursor-sdk-bridge %s + @cursor/sdk-%s %s -> %s\n", l.Bridge.Version, *plat, l.Helper.Version, *out)
+	runtimeNote := "upstream runtime"
+	if needsBaseline(l, *plat) {
+		if err := rebuildBaseline(l, *plat, *out, *cache); err != nil {
+			log.Fatalf("bridge baseline rebuild: %v", err)
+		}
+		runtimeNote = "rebuilt on Bun " + l.Baseline.Bun + " baseline (no AVX2)"
+	}
+	fmt.Printf("fetch-bridge: cursor-sdk-bridge %s (%s) + @cursor/sdk-%s %s -> %s\n", l.Bridge.Version, runtimeNote, *plat, l.Helper.Version, *out)
 }
 
 func fetch(url, cache string) []byte {

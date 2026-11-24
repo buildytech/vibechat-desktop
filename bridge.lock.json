@@ -1,5 +1,5 @@
 {
-  "$comment": "Pinned agent runtime bundled with VibeChat: the cursor-sdk-bridge standalone build (GitHub release, SHA-256 from its SHA256SUMS.txt) and the SDK platform helper with the sandbox (npm, sha512 integrity). cmd/fetch-bridge downloads and verifies them; scripts/package.sh puts them next to the app.",
+  "$comment": "Pinned agent runtime bundled with VibeChat: the cursor-sdk-bridge standalone build (GitHub release, SHA-256 from its SHA256SUMS.txt) and the SDK platform helper with the sandbox (npm, sha512 integrity). cmd/fetch-bridge downloads and verifies them; scripts/package.sh puts them next to the app. On x64 the bridge is recompiled on the pinned Bun baseline runtime (baselineRuntime) so it runs on CPUs without AVX2.",
   "bridge": {
     "version": "1.2.0",
     "url": "https://github.com/cursor/sdk-bridge/releases/download/v1.2.0/cursor-sdk-bridge-standalone-{platform}.tar.gz",
@@ -19,6 +19,21 @@
       "darwin-x64": "sha512-mJTFdX+qv9dHAm59tT7uq7ci7+BDvFoNk4gdF2zGp9SLULicY+FdFD64p1qLen1bX5Y2soZaX5mWBy7BfObjcg==",
       "linux-x64": "sha512-ainsGAFtkWTBZrLABp82Hvfv7VB/FxmZHE42qMVotFTRDwOY2iduvhSig910bVxv+kw3S00Srmu/9CxklLwhbw==",
       "win32-x64": "sha512-p3rkyta6R/nXIukd3/ifJq32otkkGoUi41T2jxnHbPHMhzE2F8OuJQGBVmORuQLMr+bIGGVZmCxertgs4WgzcQ=="
+    }
+  },
+  "baselineRuntime": {
+    "$comment": "Upstream x64 bridges run on Bun's default x64 runtime, which needs AVX2 (0xC000001D / SIGILL on older CPUs). cmd/fetch-bridge recompiles the bundle embedded in the pinned bridge on this Bun baseline runtime (same version as the bridge manifest's runtime). SHA-256 from the Bun release SHASUMS256.txt.",
+    "bun": "1.3.9",
+    "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.3.9/bun-{target}-baseline.zip",
+    "platforms": [
+      "linux-x64",
+      "win32-x64",
+      "darwin-x64"
+    ],
+    "sha256": {
+      "darwin-x64": "a6e15821aa60795f541ce18fce16bca9f2a94e193068b77f6f33330f4d0a3ad5",
+      "linux-x64": "104d4d037f4b35e10215c0507e1779691f39c57bd91ddeefe11cad781e3fc4b9",
+      "win32-x64": "cc22962b3dcc51f279f13bf843675e052479e64a323f85eb29442066cf3942fe"
     }
   }
 }
