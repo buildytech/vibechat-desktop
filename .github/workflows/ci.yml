@@ -42,6 +42,29 @@ jobs:
         run: go vet ./ ./internal/... ./cmd/...
       - name: Tests (unit, host seam contract)
         run: go test -count=1 -v ./ ./internal/... ./cmd/...
+      # Project creation e2e (templates.Scaffold + host.InstallDeps, the app's code) with the oldest supported Bun and
+      # the current one, under a parent folder with spaces and Cyrillic like a real user profile.
+      - name: Templates install e2e (Bun 1.3.3)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.3
+      - name: Templates install e2e run (Bun 1.3.3)
+        continue-on-error: true # TEMP: repro with the old v2 lockfile pin; removed with the templates bump
+        run: |
+          bun --version
+          d="$RUNNER_TEMP/Профиль пользователя/VibeChat 133"
+          mkdir -p "$d"
+          VIBECHAT_E2E_INSTALL=1 VIBECHAT_E2E_DIR="$d" go test -count=1 -v -run TestTemplatesInstallE2E .
+      - name: Templates install e2e (current Bun)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Templates install e2e run (current Bun)
+        run: |
+          bun --version
+          d="$RUNNER_TEMP/Профиль пользователя/VibeChat 144"
+          mkdir -p "$d"
+          VIBECHAT_E2E_INSTALL=1 VIBECHAT_E2E_DIR="$d" go test -count=1 -v -run TestTemplatesInstallE2E .
       - name: Headless build (server tag)
         run: go build -tags server -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat-server ./cmd/vibechat
       - name: Desktop build
@@ -59,6 +82,27 @@ jobs:
           export VIBECHAT_VERSION="${VIBECHAT_VERSION#v}"
           bash scripts/package.sh
           ls dist/vibechat-desktop-*.zip
+      # Agent runtime smoke from the shipped zip: unpack under a path with spaces and Cyrillic, run the app's own
+      # --bridge-smoke (locate bridge next to the exe, sandbox preflight, private HOME/USERPROFILE, ready + Ping).
+      - name: Bridge smoke from the portable zip
+        run: |
+          root="$RUNNER_TEMP/Профиль пользователя/Downloads"
+          rm -rf "$root" && mkdir -p "$root"
+          zip=$(ls dist/vibechat-desktop-*.zip)
+          case "$RUNNER_OS" in
+            Windows) 7z x -bso0 -bsp0 -o"$root" "$zip"; exe="$root/vibechat-desktop-windows-x64/vibechat.exe" ;;
+            macOS)   ditto -x -k "$zip" "$root"; exe="$root/BuildY VibeChat.app/Contents/MacOS/vibechat" ;;
+            Linux)   unzip -q "$zip" -d "$root"; exe="$root/vibechat-desktop-linux-x64/vibechat" ;;
+          esac
+          export VIBECHAT_DATA_DIR="$RUNNER_TEMP/Профиль пользователя/AppData/tw.buildy.vibechat"
+          "$exe" --version > smoke.txt 2>&1 || true
+          set +e
+          "$exe" --bridge-smoke >> smoke.txt 2>&1
+          code=$?
+          set -e
+          cat smoke.txt
+          echo "--- log"; cat "$VIBECHAT_DATA_DIR/logs/vibechat.log" || true
+          exit $code
       # The bare executable with the agent runtime next to it (bin/bridge: cursor-sdk-bridge + sandbox helper).
       - uses: actions/upload-artifact@v4
         with:

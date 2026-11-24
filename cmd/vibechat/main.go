@@ -36,11 +36,14 @@ func main() {
 	setKey := flag.Bool("set-key", false, "read the Cursor API key from stdin and store it in the OS keychain")
 	forgetKey := flag.Bool("forget-key", false, "remove the Cursor API key from the OS keychain")
 	showVersion := flag.Bool("version", false, "print the app version and exit")
+	smoke := flag.Bool("bridge-smoke", false, "start the bundled agent runtime up to ready with a placeholder key, then exit (CI)")
 	flag.Parse()
 	switch {
 	case *showVersion:
 		fmt.Println(appid.Name, appid.Version)
 		return
+	case *smoke:
+		os.Exit(bridgeSmoke())
 	case *setKey:
 		fmt.Fprintln(os.Stderr, "Paste the Cursor API key and press Enter:")
 		line, err := bufio.NewReader(os.Stdin).ReadString('\n')

@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	vibechat "github.com/buildytech/vibechat-desktop"
 	"github.com/buildytech/vibechat-desktop/internal/agent"
@@ -43,6 +47,9 @@ func dirs() (data, projects string) {
 func newHost(seam host.Seam) (*host.Host, func()) {
 	logf := func(s string) { log.Print(s) }
 	data, projects := dirs()
+	if f := setupLog(data); f != "" {
+		log.Printf("vibechat %s: log %s", appid.Version, f)
+	}
 	st, err := store.Open(filepath.Join(data, "state"))
 	if err != nil {
 		log.Fatalf("data folder %s: %v", data, err)
@@ -70,4 +77,50 @@ func newHost(seam host.Seam) (*host.Host, func()) {
 			runner.Close()
 		})
 	}
+}
+
+// LogFile is <data>/logs/vibechat.log (Windows: %APPDATA%\tw.buildy.vibechat\logs\vibechat.log). The GUI build has no
+// console, so the host log (bridge output included, key redacted) goes there too; the file rolls over at 5 MB.
+func setupLog(data string) string {
+	dir := filepath.Join(data, "logs")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return ""
+	}
+	file := filepath.Join(dir, "vibechat.log")
+	if st, err := os.Stat(file); err == nil && st.Size() > 5<<20 {
+		_ = os.Rename(file, file+".1")
+	}
+	f, err := os.OpenFile(file, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return ""
+	}
+	log.SetOutput(io.MultiWriter(os.Stderr, f))
+	return file
+}
+
+type fixedKey string
+
+func (k fixedKey) Key() (string, string) { return string(k), "smoke" }
+
+// bridgeSmoke starts the bundled bridge exactly like the first chat message (located next to this executable, SDK
+// sandbox check, private agent home, handshake, Ping) with a placeholder key, prints its URL and stops it.
+func bridgeSmoke() int {
+	data, _ := dirs()
+	logFile := setupLog(data)
+	exe, _ := os.Executable()
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = r
+	}
+	install, locErr := bridge.Locate(exe, os.Getenv)
+	runner := agent.NewRunner(agent.RunnerOptions{Install: install, Located: locErr, Keys: fixedKey("smoke-placeholder-key"), DataDir: data, HookExe: exe, Log: func(s string) { log.Print(s) }})
+	defer runner.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	url, err := runner.Probe(ctx)
+	if err != nil {
+		fmt.Printf("bridge smoke: FAIL: %v\nlog: %s\n", err, logFile)
+		return 1
+	}
+	fmt.Printf("bridge smoke: ready at %s (bridge %s, sdk %s)\nlog: %s\n", url, install.Manifest.BridgeVersion, install.Manifest.SDKVersion, logFile)
+	return 0
 }

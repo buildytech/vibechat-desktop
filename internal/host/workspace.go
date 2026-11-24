@@ -38,7 +38,7 @@ func (h *Host) createWorkspace(ctx context.Context, p store.Project, sid string)
 	if tpl, ok := h.template(p.TemplateID); ok && len(tpl.Install) > 0 {
 		ictx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
-		if err := runTool(ictx, dir, tpl.Install, nil, h.opts.Log); err != nil {
+		if err := InstallDeps(ictx, dir, tpl, h.opts.Log); err != nil {
 			h.opts.Log("worktree install: " + err.Error())
 		}
 	}
@@ -115,7 +115,7 @@ func (h *Host) landRun(ctx context.Context, p store.Project, s store.Session, ti
 	for _, f := range changed {
 		if f == "package.json" || strings.HasSuffix(f, "bun.lock") {
 			if tpl, ok := h.template(p.TemplateID); ok && len(tpl.Install) > 0 {
-				if err := runTool(ctx, p.Path, tpl.Install, nil, h.opts.Log); err != nil {
+				if err := InstallDeps(ctx, p.Path, tpl, h.opts.Log); err != nil {
 					h.opts.Log("reinstall after agent change: " + err.Error())
 				}
 			}

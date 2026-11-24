@@ -1,7 +1,7 @@
 package bridge
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,10 +46,11 @@ type Ready struct {
 // Process is a running bridge.
 type Process struct {
 	*Client
-	Ready Ready
-	cmd   *exec.Cmd
-	done  chan struct{}
-	once  sync.Once
+	Ready   Ready
+	cmd     *exec.Cmd
+	done    chan struct{}
+	waitErr error
+	once    sync.Once
 }
 
 const readyPrefix = "cursor-sdk-bridge ready "
@@ -68,36 +69,42 @@ func Start(ctx context.Context, o StartOptions) (*Process, error) {
 	cmd.Dir = o.Home
 	cmd.Env = childEnv(o.Env, o.Key, o.Home)
 	procgroup.Prepare(cmd)
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, err
+	readyCh := make(chan Ready, 1)
+	tail := &tailLines{max: 40}
+	sent := false
+	var sentMu sync.Mutex
+	onLine := func(line string) {
+		sentMu.Lock()
+		if !sent && strings.HasPrefix(line, readyPrefix) {
+			var r Ready
+			if json.Unmarshal([]byte(strings.TrimPrefix(line, readyPrefix)), &r) == nil {
+				readyCh <- r
+				sent = true
+			}
+		}
+		sentMu.Unlock()
+		red := Redact(line, o.Key)
+		tail.add(red)
+		if o.Log != nil {
+			o.Log(red)
+		}
 	}
+	// Writers, not pipes: cmd.Wait returns only after all output is consumed, so an early exit keeps its last lines.
+	stdout, stderr := &lineWriter{onLine: onLine}, &lineWriter{onLine: onLine}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	cmd.WaitDelay = 2 * time.Second // a grandchild holding the output open must not block Wait
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cursor-sdk-bridge could not start (%s): %w", o.Install.Executable(), err)
 	}
 	procgroup.Attach(cmd)
 	p := &Process{cmd: cmd, done: make(chan struct{})}
-	go func() { _ = cmd.Wait(); close(p.done) }()
-
-	readyCh := make(chan Ready, 1)
 	go func() {
-		sc := bufio.NewScanner(stderr)
-		sc.Buffer(make([]byte, 64<<10), 1<<20)
-		sent := false
-		for sc.Scan() {
-			line := sc.Text()
-			if !sent && strings.HasPrefix(line, readyPrefix) {
-				var r Ready
-				if json.Unmarshal([]byte(strings.TrimPrefix(line, readyPrefix)), &r) == nil {
-					readyCh <- r
-					sent = true
-				}
-			}
-			if o.Log != nil {
-				o.Log(Redact(line, o.Key))
-			}
-		}
+		p.waitErr = cmd.Wait()
+		stdout.flush()
+		stderr.flush()
+		close(p.done)
 	}()
+
 	timeout := o.ReadyTimeout
 	if timeout == 0 {
 		timeout = 30 * time.Second
@@ -106,7 +113,7 @@ func Start(ctx context.Context, o StartOptions) (*Process, error) {
 	select {
 	case ready = <-readyCh:
 	case <-p.done:
-		return nil, errors.New("cursor-sdk-bridge exited before it was ready")
+		return nil, exitedEarly(p, tail)
 	case <-time.After(timeout):
 		p.kill()
 		return nil, errors.New("cursor-sdk-bridge did not become ready")
@@ -128,6 +135,82 @@ func Start(ctx context.Context, o StartOptions) (*Process, error) {
 		return nil, fmt.Errorf("bridge ping: %w", err)
 	}
 	return p, nil
+}
+
+// exitedEarly explains a bridge that died before its ready line: exit code and the last output lines (redacted).
+func exitedEarly(p *Process, tail *tailLines) error {
+	code := "unknown"
+	if p.cmd.ProcessState != nil {
+		code = fmt.Sprint(p.cmd.ProcessState.ExitCode())
+	}
+	msg := fmt.Sprintf("cursor-sdk-bridge exited before it was ready (exit code %s)", code)
+	if t := tail.String(); t != "" {
+		msg += ":\n" + t
+	} else if p.waitErr != nil {
+		msg += ": " + p.waitErr.Error()
+	}
+	return errors.New(msg)
+}
+
+// lineWriter turns a byte stream into lines.
+type lineWriter struct {
+	mu     sync.Mutex
+	buf    []byte
+	onLine func(string)
+}
+
+func (w *lineWriter) Write(b []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.buf = append(w.buf, b...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := strings.TrimRight(string(w.buf[:i]), "\r")
+		w.buf = w.buf[i+1:]
+		w.onLine(line)
+	}
+	if len(w.buf) > 1<<20 { // a runaway line without a newline
+		w.onLine(string(w.buf))
+		w.buf = nil
+	}
+	return len(b), nil
+}
+
+func (w *lineWriter) flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.buf) > 0 {
+		w.onLine(strings.TrimRight(string(w.buf), "\r"))
+		w.buf = nil
+	}
+}
+
+// tailLines keeps the last max lines (each clipped to 500 bytes).
+type tailLines struct {
+	mu    sync.Mutex
+	max   int
+	lines []string
+}
+
+func (t *tailLines) add(l string) {
+	if len(l) > 500 {
+		l = l[:500] + "…"
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lines = append(t.lines, l)
+	if len(t.lines) > t.max {
+		t.lines = t.lines[len(t.lines)-t.max:]
+	}
+}
+
+func (t *tailLines) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return strings.TrimSpace(strings.Join(t.lines, "\n"))
 }
 
 // Alive reports whether the process still runs.

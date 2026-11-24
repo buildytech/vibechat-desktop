@@ -120,6 +120,16 @@ func (r *Runner) SandboxError() error { return r.sandbox }
 // HasKey reports whether a key is configured.
 func (r *Runner) HasKey() bool { k, _ := r.o.Keys.Key(); return k != "" }
 
+// Probe starts the bridge the way the first chat message does (sandbox check, private home, handshake and Ping) and
+// returns its URL; the CI smoke (vibechat --bridge-smoke) uses it without a real key.
+func (r *Runner) Probe(ctx context.Context) (string, error) {
+	p, err := r.client(ctx)
+	if err != nil {
+		return "", err
+	}
+	return p.Ready.URL, nil
+}
+
 // client returns a running bridge, starting (or restarting on a key change) as needed.
 func (r *Runner) client(ctx context.Context) (*bridge.Process, error) {
 	if r.sandbox != nil {

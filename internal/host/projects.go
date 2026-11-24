@@ -182,7 +182,7 @@ func (h *Host) startSetup(p store.Project, tpl templates.Profile) *projectSetup 
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		s.err = runTool(ctx, p.Path, tpl.Install, nil, h.opts.Log)
+		s.err = InstallDeps(ctx, p.Path, tpl, h.opts.Log)
 	}()
 	return s
 }
