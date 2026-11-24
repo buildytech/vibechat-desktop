@@ -13,7 +13,8 @@ func accelerators(m *application.Menu, out map[string]string) {
 	for i := 0; m.ItemAt(i) != nil; i++ {
 		item := m.ItemAt(i)
 		if a := item.GetAccelerator(); a != "" {
-			out[strings.ToLower(a)] = item.Label()
+			// CmdOrCtrl reads "cmd+" when the test runs on macOS.
+			out[strings.Replace(strings.ToLower(a), "cmd+", "ctrl+", 1)] = item.Label()
 		}
 		if sub := item.GetSubmenu(); sub != nil {
 			accelerators(sub, out)
