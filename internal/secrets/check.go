@@ -20,11 +20,27 @@ func Foreign(key string) string {
 	return ""
 }
 
+// Duplicated reports a key that is one string repeated twice (pasted into a field that already held it): even
+// length, equal halves.
+func Duplicated(key string) bool {
+	k := strings.TrimSpace(key)
+	if len(k) < 16 || len(k)%2 != 0 {
+		return false
+	}
+	return k[:len(k)/2] == k[len(k)/2:]
+}
+
+// ErrPastedTwice is the save error of a duplicated key.
+var ErrPastedTwice = errors.New("key appears to be pasted twice (Ключ вставлен дважды): clear the field and paste it once")
+
 // CheckFormat rejects what cannot be a key: empty, whitespace inside, non-ASCII or control characters. key must be
 // trimmed already. Prefixes are not judged here (grok_… keys are Cursor keys); Cursor itself decides.
 func CheckFormat(key string) error {
 	if key == "" {
 		return errors.New("the key is empty")
+	}
+	if Duplicated(key) {
+		return ErrPastedTwice
 	}
 	for _, r := range key {
 		switch {
@@ -57,6 +73,9 @@ func Describe(key, source string) string {
 	if strings.IndexFunc(key, func(r rune) bool { return r > unicode.MaxASCII || unicode.IsControl(r) }) >= 0 {
 		ascii = ", NON-ASCII/CONTROL CHARACTERS"
 	}
+	if Duplicated(key) {
+		ascii += fmt.Sprintf(", LOOKS DUPLICATED (pasted twice: the same %d characters twice)", len(key)/2)
+	}
 	if source == "" {
 		source = "unknown"
 	}
@@ -66,6 +85,9 @@ func Describe(key, source string) string {
 // AuthHint explains a key Cursor rejected (unauthenticated / permission denied).
 func AuthHint(key, source string) string {
 	who := ""
+	if Duplicated(key) {
+		who = "The key looks duplicated: it was pasted twice (Ключ вставлен дважды). Paste it once in Settings. "
+	}
 	if f := Foreign(key); f != "" {
 		who = "This is a " + f + " key, not a key of type Cursor. "
 	}

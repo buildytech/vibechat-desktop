@@ -49,12 +49,17 @@ type Runner struct {
 	catalogAt  time.Time
 	// unavailable: per key (sha256 prefix, memory only), menu ids that failed with an access or plan error.
 	unavailable map[string]map[string]bool
+	// noSandbox: agents run without the SDK sandbox (Windows, or the bridge refused it once).
+	noSandbox bool
 }
 
 // NewRunner checks the sandbox once (helper present + preflight) and prepares the private agent home.
 func NewRunner(o RunnerOptions) *Runner {
-	r := &Runner{o: o}
+	r := &Runner{o: o, noSandbox: runtime.GOOS == "windows"}
 	r.sandbox = r.checkSandbox()
+	if r.noSandbox && o.Log != nil {
+		o.Log("agent: Windows — agents run without the SDK sandbox (cursor-sdk-bridge has no filesystem sandbox on win32); permission hooks still apply")
+	}
 	return r
 }
 
@@ -320,7 +325,7 @@ func (r *Runner) MarkUnavailable(modelID string, err error) bool {
 	return true
 }
 
-func agentOptions(cwd string, model Selection) map[string]any {
+func agentOptions(cwd string, model Selection, sandboxed bool) map[string]any {
 	return map[string]any{
 		"model": model,
 		"local": map[string]any{
@@ -328,9 +333,43 @@ func agentOptions(cwd string, model Selection) map[string]any {
 			// PROJECT: the template's AGENTS.md / .cursor/rules guide the agent (project hooks.json / sandbox.json are
 			// refused by sandbox.CheckWorkspace before every run). USER: the private agent home's hooks + sandbox.json.
 			"settingSources": []string{"SETTING_SOURCE_PROJECT", "SETTING_SOURCE_USER"},
-			"sandboxOptions": map[string]any{"enabled": true},
+			// enabled=false is explicit: otherwise the private home's sandbox.json would request the sandbox again.
+			"sandboxOptions": map[string]any{"enabled": sandboxed},
 		},
 	}
+}
+
+// sandboxUnsupported is the bridge's refusal of a sandboxed local agent ("Local SDK sandboxing was requested, but
+// sandboxing is not supported in this environment"). cursor-sdk-bridge 1.2.0 on Windows always answers it: its win32
+// sandbox helper is proxy-only, without filesystem isolation.
+func sandboxUnsupported(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "sandboxing is not supported in this environment")
+}
+
+// sandboxed reports whether agents are created with the SDK sandbox: not on Windows (see sandboxUnsupported), and not
+// after the bridge refused it once in this process.
+func (r *Runner) sandboxed() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return !r.noSandbox
+}
+
+// withSandboxFallback runs call with the agent options; when the bridge refuses the sandbox it logs that, remembers
+// it for this process and runs call once more without it. The permission hooks of the private agent home and the
+// workspace checks apply either way.
+func (r *Runner) withSandboxFallback(cwd string, model Selection, call func(map[string]any) error) error {
+	on := r.sandboxed()
+	err := call(agentOptions(cwd, model, on))
+	if on && sandboxUnsupported(err) {
+		r.mu.Lock()
+		r.noSandbox = true
+		r.mu.Unlock()
+		if r.o.Log != nil {
+			r.o.Log("agent: the bridge does not support the SDK sandbox here (" + err.Error() + "); running agents without it (permission hooks still apply)")
+		}
+		err = call(agentOptions(cwd, model, false))
+	}
+	return err
 }
 
 // EnsureAgent creates a Cursor agent for cwd, or resumes agentID (in this or a restarted bridge).
@@ -339,18 +378,21 @@ func (r *Runner) EnsureAgent(ctx context.Context, agentID, cwd string, model Sel
 	if err != nil {
 		return "", err
 	}
+	type idRes struct {
+		AgentID string `json:"agentId"`
+	}
 	if agentID != "" {
-		var res struct {
-			AgentID string `json:"agentId"`
-		}
-		if err := p.Unary(ctx, "SdkAgentService", "ResumeAgent", map[string]any{"agentId": agentID, "options": agentOptions(cwd, model)}, &res); err == nil {
+		var res idRes
+		if err := r.withSandboxFallback(cwd, model, func(opts map[string]any) error {
+			return p.Unary(ctx, "SdkAgentService", "ResumeAgent", map[string]any{"agentId": agentID, "options": opts}, &res)
+		}); err == nil {
 			return firstNonEmpty(res.AgentID, agentID), nil
 		}
 	}
-	var res struct {
-		AgentID string `json:"agentId"`
-	}
-	if err := p.Unary(ctx, "SdkAgentService", "CreateAgent", map[string]any{"options": agentOptions(cwd, model)}, &res); err != nil {
+	var res idRes
+	if err := r.withSandboxFallback(cwd, model, func(opts map[string]any) error {
+		return p.Unary(ctx, "SdkAgentService", "CreateAgent", map[string]any{"options": opts}, &res)
+	}); err != nil {
 		return "", err
 	}
 	if res.AgentID == "" {

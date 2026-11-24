@@ -16,6 +16,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
@@ -53,6 +54,9 @@ func main() {
 		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil && line == "" {
 			log.Fatal("no key read from stdin")
+		}
+		if err := secrets.CheckFormat(strings.TrimSpace(line)); err != nil {
+			log.Fatalf("not stored: %v", err)
 		}
 		if err := (secrets.Keys{}).Store(line); err != nil {
 			log.Fatalf("keychain: %v", err)

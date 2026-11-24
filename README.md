@@ -56,7 +56,11 @@ version. Releases are built by CI from a `v*` tag.
   127.0.0.1 with a bearer token; the key reaches it only as `CURSOR_API_KEY` in its environment (never argv, a URL or a
   file). The catalog calls (`Me`, `ListModels`) need the key in their loopback request body; agent runs use the env.
 - **The SDK sandbox is mandatory.** At start the host runs the helper's preflight; no bridge, no helper or a failed
-  preflight turns `agent_sandbox` off and every prompt answers 503. Nothing runs unsandboxed.
+  preflight turns `agent_sandbox` off and every prompt answers 503. **Exception: Windows.** cursor-sdk-bridge 1.2.0
+  refuses a sandboxed local agent on win32 ("Local SDK sandboxing was requested, but sandboxing is not supported in
+  this environment": its Windows helper is proxy-only, no filesystem isolation), so on Windows agents are created
+  with `sandboxOptions.enabled=false` (logged at start); elsewhere that refusal is retried once without the sandbox
+  and logged. The permission hooks below and the workspace checks still apply.
 - The bridge runs with a private `HOME` (`<data>/agent-home`) that holds the user-level `.cursor/sandbox.json`
   (`readBoundary: workspace`, `networkAccess: false`, plus the tool runtimes and `/proc` Bun needs) and
   `.cursor/hooks.json`: fail-closed `preToolUse` / `beforeReadFile` hooks that run this binary (`vibechat --hook`) and
