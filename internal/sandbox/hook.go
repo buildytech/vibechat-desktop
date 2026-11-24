@@ -115,7 +115,7 @@ func toolDecision(in HookInput, root string) Decision {
 			if p == "" {
 				continue
 			}
-			if k == "glob_pattern" && !filepath.IsAbs(p) && !strings.HasPrefix(p, "..") {
+			if k == "glob_pattern" && !rooted(p) && !strings.HasPrefix(p, "..") {
 				continue
 			}
 			abs := resolve(root, p)
@@ -145,10 +145,23 @@ func resolve(root, p string) string {
 	if strings.HasPrefix(p, "~") {
 		return "/nonexistent-home" + p[1:]
 	}
-	if !filepath.IsAbs(p) {
+	switch {
+	case filepath.IsAbs(p):
+	case filepath.VolumeName(p) != "":
+		// Windows "C:x": relative to that drive's working folder, never the project; Inside rejects it.
+	case rooted(p):
+		// Windows "/etc" or "\etc": the root of the project's drive, not a path under the project.
+		p = filepath.VolumeName(root) + p
+	default:
 		p = filepath.Join(root, p)
 	}
 	return realish(filepath.Clean(p))
+}
+
+// rooted reports an absolute path, or one that names a root without being absolute on this OS
+// ("/x" and "\x" on Windows, or a drive with a relative path such as "C:x").
+func rooted(p string) bool {
+	return filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`) || filepath.VolumeName(p) != ""
 }
 
 // realish is EvalSymlinks of the longest existing prefix of p, with the rest appended.

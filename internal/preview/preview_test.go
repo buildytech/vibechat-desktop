@@ -46,9 +46,12 @@ func fakeProfile() templates.Profile {
 
 func startFake(t *testing.T) (*Manager, string) {
 	t.Helper()
+	// TempDir first: cleanups run last-in first-out, so the dev server stops before its folder is removed
+	// (Windows cannot remove a folder a live process works in).
+	dir := t.TempDir()
 	m := New(func(s string) { t.Log(s) })
 	t.Cleanup(m.StopAll)
-	st, err := m.Ensure("p1", t.TempDir(), fakeProfile())
+	st, err := m.Ensure("p1", dir, fakeProfile())
 	if err != nil {
 		t.Fatal(err)
 	}
