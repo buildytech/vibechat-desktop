@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/buildytech/vibechat-desktop/internal/bridge"
 )
 
 func call(t *testing.T, h http.Handler, method, path string, body any) (int, map[string]any) {
@@ -216,5 +218,52 @@ func TestEventsStream(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatalf("no %s event", w)
 		}
+	}
+}
+
+// Saving the key: format checks, the xai- hint, and the online check through Me (warning, never a lost key).
+func TestCredentialSaveChecksTheKey(t *testing.T) {
+	e := newEnv(t, pinnedSeam(t), false)
+	put := func(k string) (int, string) {
+		code, out := call(t, e.host, "PUT", "/me/credentials/cursor-sdk/cursor", map[string]any{"key": k})
+		return code, mustJSON(out)
+	}
+	if code, out := put("xai-supersecret1234567890"); code != 400 || !strings.Contains(out, "grok.com/dashboard/api-keys") || strings.Contains(out, "supersecret") {
+		t.Fatalf("xai key: %d %s", code, out)
+	}
+	if code, out := put("grok_super secret_1234567890"); code != 400 || !strings.Contains(out, "spaces") {
+		t.Fatalf("inner space: %d %s", code, out)
+	}
+	if code, out := put("grok_bad_supersecret_2a61"); code != 200 || !strings.Contains(out, "Invalid Service Token") ||
+		!strings.Contains(out, "grok.com/dashboard/api-keys") || !strings.Contains(out, `starts with \"grok\"`) || strings.Contains(out, "supersecret") {
+		t.Fatalf("rejected key: %d %s", code, out)
+	} else if k, _ := e.host.opts.Keys.Key(); k != "grok_bad_supersecret_2a61" {
+		t.Fatal("a rejected key must still be kept")
+	}
+	if code, out := put("grok_offline_supersecret"); code != 200 || !strings.Contains(out, "could not check") {
+		t.Fatalf("offline: %d %s", code, out)
+	}
+	if code, out := put("  grok_good_supersecret_2a61\n"); code != 200 || !strings.Contains(out, "a@b.c") || strings.Contains(out, "warning") {
+		t.Fatalf("good key: %d %s", code, out)
+	} else if k, _ := e.host.opts.Keys.Key(); k != "grok_good_supersecret_2a61" {
+		t.Fatalf("not trimmed: %q", k)
+	}
+}
+
+// "Could not start the agent: bridge: unauthenticated: …" carries the key diagnostic and where to get a key.
+func TestAgentErrorExplainsARejectedKey(t *testing.T) {
+	e := newEnv(t, pinnedSeam(t), false)
+	_ = e.host.opts.Keys.Store("grok_supersecret_middle_2a61")
+	msg := e.host.agentError("Could not start the agent: ", &bridge.Error{Code: "unauthenticated", Message: "Invalid Service Token"})
+	for _, want := range []string{"Invalid Service Token", "28 chars", `"grok"`, `"2a61"`, "from keychain", "grok.com/dashboard/api-keys"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("%q lacks %q", msg, want)
+		}
+	}
+	if strings.Contains(msg, "supersecret") {
+		t.Fatal("key leaked")
+	}
+	if got := e.host.agentError("x: ", errors.New("boom")); got != "x: boom" {
+		t.Errorf("other errors unchanged: %q", got)
 	}
 }

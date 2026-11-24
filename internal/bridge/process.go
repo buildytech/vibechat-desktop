@@ -68,6 +68,9 @@ func Start(ctx context.Context, o StartOptions) (*Process, error) {
 	cmd := procgroup.Command(o.Install.Executable(), "--host", "127.0.0.1", "--port", "0", "--state-root", o.StateRoot)
 	cmd.Dir = o.Home
 	cmd.Env = childEnv(o.Env, o.Key, o.Home)
+	if dropped := droppedCursorVars(o.Env); len(dropped) > 0 && o.Log != nil {
+		o.Log("bridge: not passing inherited " + strings.Join(dropped, ", ") + " (the app uses the default Cursor backend and its own key)")
+	}
 	procgroup.Prepare(cmd)
 	readyCh := make(chan Ready, 1)
 	tail := &tailLines{max: 40}
@@ -253,13 +256,34 @@ func childEnv(base []string, key, home string) []string {
 	out := make([]string, 0, len(base)+4)
 	for _, kv := range base {
 		name, _, _ := strings.Cut(kv, "=")
-		switch strings.ToUpper(name) {
+		up := strings.ToUpper(name)
+		switch up {
 		case "CURSOR_API_KEY", "HOME", "USERPROFILE", "XDG_CONFIG_HOME", "CURSOR_SDK_BRIDGE_LOG":
+			continue
+		}
+		// Any other inherited CURSOR_* (CURSOR_BACKEND_URL, CURSOR_DATA_DIR, …) would redirect the bridge to another
+		// backend or state: the app always talks to the default Cursor backend.
+		if strings.HasPrefix(up, "CURSOR_") {
 			continue
 		}
 		out = append(out, kv)
 	}
 	return append(out, "CURSOR_API_KEY="+key, "HOME="+home, "USERPROFILE="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"))
+}
+
+// droppedCursorVars names the inherited CURSOR_* variables childEnv leaves out (names only, never values).
+func droppedCursorVars(base []string) []string {
+	if base == nil {
+		base = os.Environ()
+	}
+	var out []string
+	for _, kv := range base {
+		name, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(strings.ToUpper(name), "CURSOR_") {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // Redact removes key from s.

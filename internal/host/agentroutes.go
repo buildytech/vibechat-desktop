@@ -50,23 +50,17 @@ func (h *Host) agentCapabilities(w http.ResponseWriter, r *http.Request, prm Par
 	if _, ok := h.project(w, prm["id"]); !ok {
 		return
 	}
-	models := agent.Allowlist
+	// The menu is the key's model list from Cursor. Without a key or a reachable Cursor only Auto is offered (the
+	// run then reports what is wrong).
+	models := []agent.Model{{ID: agent.AutoID, Provider: "cursor", Label: "Auto"}}
 	if h.opts.Agent != nil && h.opts.Agent.HasKey() && h.opts.Agent.SandboxError() == nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-		ids, err := h.opts.Agent.ModelIDs(ctx)
+		list, err := h.opts.Agent.Models(ctx)
 		cancel()
-		if err == nil && len(ids) > 0 {
-			have := map[string]bool{"auto": true}
-			for _, id := range ids {
-				have[id] = true
-			}
-			var filtered []agent.Model
-			for _, m := range agent.Allowlist {
-				if have[agent.ToSelection(m.ID, nil).ID] {
-					filtered = append(filtered, m)
-				}
-			}
-			models = filtered
+		if err == nil && len(list) > 0 {
+			models = list
+		} else if err != nil {
+			h.logf("model list: %v", err)
 		}
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{
@@ -191,8 +185,8 @@ func (b promptBody) validate() error {
 	if strings.TrimSpace(b.Text) == "" || n > promptTextMax {
 		return fmt.Errorf("Prompt must be 1–%d characters", promptTextMax)
 	}
-	if !agent.Allowed(b.ModelID) {
-		return fmt.Errorf("Model %q is not available in VibeChat", b.ModelID)
+	if !strings.HasPrefix(b.ModelID, "cursor/") || len(b.ModelID) > 128 {
+		return fmt.Errorf("Model %q is not a Cursor model", b.ModelID)
 	}
 	if len(b.Images) > promptImagesMax {
 		return fmt.Errorf("At most %d images per prompt", promptImagesMax)
@@ -284,11 +278,17 @@ func (h *Host) runPrompt(ctx context.Context, p store.Project, s *store.Session,
 	if err := h.syncBeforeRun(ctx, p, *s); err != nil {
 		return fail(err.Error())
 	}
-	model := agent.ToSelection(body.ModelID, body.ModelParams)
+	model, err := h.opts.Agent.Select(ctx, body.ModelID, body.ModelParams)
+	if err != nil {
+		if errors.Is(err, agent.ErrUnknownModel) {
+			return fail(err.Error() + " — pick another model (the list is refreshed when the chat is reopened)")
+		}
+		return fail(h.agentError("Could not start the agent: ", err))
+	}
 	cwd := h.sessionDir(p, *s)
 	agentID, err := h.opts.Agent.EnsureAgent(ctx, s.AgentID, cwd, model)
 	if err != nil {
-		return fail("Could not start the agent: " + err.Error())
+		return fail(h.agentError("Could not start the agent: ", err) + h.modelDropped(body.ModelID, err))
 	}
 	if agentID != s.AgentID {
 		s.AgentID = agentID
@@ -317,9 +317,9 @@ func (h *Host) runPrompt(ctx context.Context, p store.Project, s *store.Session,
 	errMsg := ""
 	switch {
 	case sendErr != nil:
-		errMsg = "Agent run failed: " + sendErr.Error()
+		errMsg = h.agentError("Agent run failed: ", sendErr) + h.modelDropped(body.ModelID, sendErr)
 	case tr.Error != "":
-		errMsg = "Agent run " + strings.ToLower(tr.Error)
+		errMsg = "Agent run " + strings.ToLower(tr.Error) + h.modelDropped(body.ModelID, errors.New(tr.Error))
 	case landErr != nil:
 		errMsg = landErr.Error()
 	}
@@ -474,4 +474,12 @@ func (h *Host) feedback(w http.ResponseWriter, r *http.Request, prm Params) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// modelDropped marks a model that failed with an access or plan error unavailable for this key and says so.
+func (h *Host) modelDropped(modelID string, err error) string {
+	if h.opts.Agent != nil && h.opts.Agent.MarkUnavailable(modelID, err) {
+		return "\n\nThis model is not available for your Cursor key and was removed from the model list; pick another one."
+	}
+	return ""
 }

@@ -4,6 +4,7 @@
 //	vibechat              open the app
 //	vibechat --set-key    read the Cursor API key from stdin and keep it in the OS keychain (never pass it in argv)
 //	vibechat --forget-key remove it from the keychain
+//	vibechat --check-key  ask Cursor whether the stored key works (Me + agent create), print a non-secret diagnostic
 //	vibechat --hook <ev>  the agent's permission hook (stdin JSON → stdout JSON), installed by the host itself
 package main
 
@@ -36,6 +37,7 @@ func main() {
 	setKey := flag.Bool("set-key", false, "read the Cursor API key from stdin and store it in the OS keychain")
 	forgetKey := flag.Bool("forget-key", false, "remove the Cursor API key from the OS keychain")
 	showVersion := flag.Bool("version", false, "print the app version and exit")
+	checkKeyFlag := flag.Bool("check-key", false, "check the stored Cursor key with Cursor through the agent runtime and print a diagnostic (no key printed)")
 	smoke := flag.Bool("bridge-smoke", false, "start the bundled agent runtime up to ready with a placeholder key, then exit (CI)")
 	flag.Parse()
 	switch {
@@ -44,6 +46,8 @@ func main() {
 		return
 	case *smoke:
 		os.Exit(bridgeSmoke())
+	case *checkKeyFlag:
+		os.Exit(checkKey())
 	case *setKey:
 		fmt.Fprintln(os.Stderr, "Paste the Cursor API key and press Enter:")
 		line, err := bufio.NewReader(os.Stdin).ReadString('\n')

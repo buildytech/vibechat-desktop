@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,14 +38,17 @@ type RunnerOptions struct {
 
 // Runner owns the bridge process and the Cursor agents.
 type Runner struct {
-	o        RunnerOptions
-	mu       sync.Mutex
-	proc     *bridge.Process
-	procKey  string
-	sandbox  error // nil when the SDK sandbox is usable
-	checked  bool
-	models   []string
-	modelsAt time.Time
+	o          RunnerOptions
+	mu         sync.Mutex
+	proc       *bridge.Process
+	procKey    string
+	sandbox    error // nil when the SDK sandbox is usable
+	checked    bool
+	catalog    Catalog
+	catalogKey string
+	catalogAt  time.Time
+	// unavailable: per key (sha256 prefix, memory only), menu ids that failed with an access or plan error.
+	unavailable map[string]map[string]bool
 }
 
 // NewRunner checks the sandbox once (helper present + preflight) and prepares the private agent home.
@@ -139,6 +144,14 @@ func (r *Runner) client(ctx context.Context) (*bridge.Process, error) {
 		return nil, r.sandbox
 	}
 	key, _ := r.o.Keys.Key()
+	return r.clientFor(ctx, key)
+}
+
+// clientFor returns a bridge running with key (CURSOR_API_KEY in its env), restarting the one of another key.
+func (r *Runner) clientFor(ctx context.Context, key string) (*bridge.Process, error) {
+	if r.sandbox != nil {
+		return nil, r.sandbox
+	}
 	if key == "" {
 		return nil, ErrNoKey
 	}
@@ -191,6 +204,31 @@ func (r *Runner) Me(ctx context.Context) (Account, error) {
 	return res.User, err
 }
 
+// CheckKey asks Cursor whether key works (Me through the bridge) before it is stored. The bridge is started with
+// key, so after saving it the first run reuses that process.
+func (r *Runner) CheckKey(ctx context.Context, key string) (Account, error) {
+	p, err := r.clientFor(ctx, key)
+	if err != nil {
+		return Account{}, err
+	}
+	var res struct {
+		User Account `json:"user"`
+	}
+	err = p.Unary(ctx, "SdkCursorService", "Me", map[string]any{"options": map[string]any{"apiKey": key}}, &res)
+	return res.User, err
+}
+
+// IsUnauthenticated reports a key Cursor rejected: the bridge answers unauthenticated ("Invalid User API Key",
+// "Invalid Service Token", ...) or permission_denied.
+func IsUnauthenticated(err error) bool {
+	var be *bridge.Error
+	if errors.As(err, &be) {
+		// permission_denied about a model or plan is a model access error (ModelAccessError), not a bad key
+		return be.Code == "unauthenticated" || (be.Code == "permission_denied" && !mentionsModelAccess(be.Message))
+	}
+	return false
+}
+
 // catalogRequest carries the key for the catalog calls (Me, ListModels): unlike agent runs the bridge does not fall
 // back to its CURSOR_API_KEY env there. The key travels only in this loopback request body (bearer-authenticated),
 // never in argv, a URL or a file.
@@ -199,13 +237,14 @@ func (r *Runner) catalogRequest() map[string]any {
 	return map[string]any{"options": map[string]any{"apiKey": key}}
 }
 
-// ModelIDs lists the Cursor model ids the key can use (cached for 10 minutes).
-func (r *Runner) ModelIDs(ctx context.Context) ([]string, error) {
+// Catalog is the key's model list from Cursor (ListModels through the bridge), cached for 10 minutes per key.
+func (r *Runner) Catalog(ctx context.Context) (Catalog, error) {
+	key, _ := r.o.Keys.Key()
 	r.mu.Lock()
-	if r.models != nil && time.Since(r.modelsAt) < 10*time.Minute {
-		m := r.models
+	if r.catalog != nil && r.catalogKey == key && time.Since(r.catalogAt) < 10*time.Minute {
+		c := r.catalog
 		r.mu.Unlock()
-		return m, nil
+		return c, nil
 	}
 	r.mu.Unlock()
 	p, err := r.client(ctx)
@@ -213,21 +252,72 @@ func (r *Runner) ModelIDs(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	var res struct {
-		Items []struct {
-			ID string `json:"id"`
-		} `json:"items"`
+		Items Catalog `json:"items"`
 	}
 	if err := p.Unary(ctx, "SdkCursorService", "ListModels", r.catalogRequest(), &res); err != nil {
 		return nil, err
 	}
-	ids := make([]string, 0, len(res.Items))
-	for _, it := range res.Items {
-		ids = append(ids, it.ID)
-	}
 	r.mu.Lock()
-	r.models, r.modelsAt = ids, time.Now()
+	r.catalog, r.catalogKey, r.catalogAt = res.Items, key, time.Now()
 	r.mu.Unlock()
-	return ids, nil
+	return res.Items, nil
+}
+
+func keyID(key string) string {
+	h := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(h[:8])
+}
+
+// Models is the Studio menu for the current key: the catalog minus the models marked unavailable for it.
+func (r *Runner) Models(ctx context.Context) ([]Model, error) {
+	c, err := r.Catalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	key, _ := r.o.Keys.Key()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return c.Menu(r.unavailable[keyID(key)]), nil
+}
+
+// Select resolves a menu id for the current key.
+func (r *Runner) Select(ctx context.Context, modelID string, params []ModelParam) (Selection, error) {
+	c, err := r.Catalog(ctx)
+	if err != nil {
+		return Selection{}, err
+	}
+	key, _ := r.o.Keys.Key()
+	r.mu.Lock()
+	bad := r.unavailable[keyID(key)][modelID]
+	r.mu.Unlock()
+	if bad {
+		return Selection{}, fmt.Errorf("%w: %s failed for this key before", ErrUnknownModel, modelID)
+	}
+	return c.Select(modelID, params)
+}
+
+// MarkUnavailable removes modelID from this key's menu when err is an access or plan error; it reports whether it did.
+func (r *Runner) MarkUnavailable(modelID string, err error) bool {
+	if modelID == AutoID || !ModelAccessError(err) {
+		return false
+	}
+	key, _ := r.o.Keys.Key()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.unavailable == nil {
+		r.unavailable = map[string]map[string]bool{}
+	}
+	k := keyID(key)
+	if r.unavailable[k] == nil {
+		r.unavailable[k] = map[string]bool{}
+	}
+	// the plan covers a model, not a variant: the plain and the Fast entry go together
+	base := strings.TrimSuffix(modelID, "-fast")
+	r.unavailable[k][base], r.unavailable[k][base+"-fast"] = true, true
+	if r.o.Log != nil {
+		r.o.Log(fmt.Sprintf("model %s marked unavailable for this key: %v", modelID, err))
+	}
+	return true
 }
 
 func agentOptions(cwd string, model Selection) map[string]any {

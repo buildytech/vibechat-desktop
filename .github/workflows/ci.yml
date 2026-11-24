@@ -140,6 +140,18 @@ jobs:
           cat smoke-installed.txt
           echo "--- log"; cat "$APPDATA/tw.buildy.vibechat/logs/vibechat.log" || true
           exit $code
+      # A real agent run (Composer 2.5 Fast, "Reply OK") through the app's path: menu from the key's model list →
+      # Select → create → Send. Only when the repository has the VIBECHAT_LIVE_CURSOR_KEY secret (a Cursor-type key);
+      # skipped otherwise. Windows: GitHub Linux runners have no SDK sandbox.
+      - name: Live agent run (Windows, VIBECHAT_LIVE_CURSOR_KEY secret only)
+        if: runner.os == 'Windows'
+        env:
+          CURSOR_API_KEY: ${{ secrets.VIBECHAT_LIVE_CURSOR_KEY }}
+        run: |
+          if [ -z "$CURSOR_API_KEY" ]; then echo "::notice::no VIBECHAT_LIVE_CURSOR_KEY secret: live agent run skipped"; exit 0; fi
+          hook=$(ls "$PWD"/bin/vibechat.exe 2>/dev/null || echo "$PWD/bin/vibechat")
+          VIBECHAT_BRIDGE_DIR="$PWD/bin/bridge" VIBECHAT_HOOK_EXE="$hook" VIBECHAT_LIVE_MENU=cursor/composer-2.5-fast \
+            go test -count=1 -tags live -run TestLiveMenuRuns -v ./internal/agent
       # The bare executable with the agent runtime next to it (bin/bridge: cursor-sdk-bridge + sandbox helper).
       - uses: actions/upload-artifact@v4
         with:
@@ -192,6 +204,8 @@ jobs:
 
           Projects need [Bun](https://bun.sh) 1.3.3 or newer on PATH (`bun upgrade`). Then `vibechat --set-key` (paste the Cursor
           API key, kept in the OS keychain) or set it in Settings.
+          The key is an API key of type **Cursor** (`grok_…`) from https://grok.com/dashboard/api-keys ("Grok API" `xai-…`
+          keys do not work). `vibechat --check-key > check.txt` checks it with Cursor and writes a diagnostic without the key.
 
           Log for bug reports: Windows `%APPDATA%\tw.buildy.vibechat\logs\vibechat.log`, macOS
           `~/Library/Application Support/tw.buildy.vibechat/logs/vibechat.log`, Linux `~/.config/tw.buildy.vibechat/logs/vibechat.log`.

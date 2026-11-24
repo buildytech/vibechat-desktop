@@ -148,3 +148,72 @@ func bridgeSmoke() int {
 	fmt.Printf("bridge smoke: ready at %s (bridge %s, sdk %s)\nlog: %s\n", url, install.Manifest.BridgeVersion, install.Manifest.SDKVersion, logFile)
 	return 0
 }
+
+// checkKey is `vibechat --check-key` for bug reports: the stored key's non-secret diagnostic, then Me and an agent
+// create through the bundled bridge, each with Cursor's answer. Output goes to stdout and the log (on Windows run
+// it as `vibechat.exe --check-key > check.txt`: the GUI build has no console).
+func checkKey() int {
+	data, _ := dirs()
+	logFile := setupLog(data)
+	say := func(format string, args ...any) {
+		line := fmt.Sprintf(format, args...)
+		fmt.Println(line)
+		log.Print("check-key: " + line)
+	}
+	keys := secrets.Keys{}
+	key, source := keys.Key()
+	if key == "" {
+		say("no Cursor key: Settings in the app or `vibechat --set-key`; %s", secrets.WhereToGet)
+		return 2
+	}
+	say("vibechat %s, %s", appid.Version, secrets.Describe(key, source))
+	if err := secrets.CheckFormat(key); err != nil {
+		say("FAIL format: %v", err)
+	}
+	if f := secrets.Foreign(key); f != "" {
+		say("FAIL: this is a %s key; %s", f, secrets.WhereToGet)
+	}
+	exe, _ := os.Executable()
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = r
+	}
+	install, locErr := bridge.Locate(exe, os.Getenv)
+	runner := agent.NewRunner(agent.RunnerOptions{Install: install, Located: locErr, Keys: keys, DataDir: data, HookExe: exe, Log: func(s string) { log.Print(s) }})
+	defer runner.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	code := 0
+	report := func(step string, err error) {
+		if err == nil {
+			return
+		}
+		code = 1
+		say("FAIL %s: %v", step, err)
+		if agent.IsUnauthenticated(err) {
+			say("hint: %s", secrets.AuthHint(key, source))
+		}
+	}
+	acc, err := runner.CheckKey(ctx, key)
+	report("Me", err)
+	if err == nil {
+		say("ok Me: key %q of %s", acc.APIKeyName, acc.UserEmail)
+	}
+	ws, _ := os.MkdirTemp("", "vibechat-check-")
+	defer os.RemoveAll(ws)
+	menu, err := runner.Models(ctx)
+	report("model list", err)
+	if err == nil {
+		say("ok model list: %d entries", len(menu))
+	}
+	sel, err := runner.Select(ctx, agent.AutoID, nil)
+	if err != nil {
+		sel = agent.Selection{ID: "default"}
+	}
+	id, err := runner.EnsureAgent(ctx, "", ws, sel)
+	report("agent create", err)
+	if err == nil {
+		say("ok agent create: %s", id)
+	}
+	say("log: %s", logFile)
+	return code
+}

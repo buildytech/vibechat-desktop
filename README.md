@@ -31,7 +31,11 @@ Projects need [Bun](https://bun.sh) 1.3.3 or newer on PATH (`bun upgrade`); an o
 message. A Cursor API key is needed for the agent: Settings in the app, or `vibechat --set-key`. The app log (bridge
 output included, key redacted) is `%APPDATA%\tw.buildy.vibechat\logs\vibechat.log` on Windows,
 `~/Library/Application Support/tw.buildy.vibechat/logs/vibechat.log` on macOS, `~/.config/tw.buildy.vibechat/logs/vibechat.log`
-on Linux; `vibechat --bridge-smoke` checks that the agent runtime starts. `vibechat --version` prints the
+on Linux; `vibechat --bridge-smoke` checks that the agent runtime starts. `vibechat --check-key` checks the stored key with Cursor (Me +
+agent create) and prints a non-secret diagnostic (length, first/last 4 characters, whitespace, source); on Windows
+run `vibechat.exe --check-key > check.txt`. The key is an API key of type **Cursor** (`grok_…`) from
+https://grok.com/dashboard/api-keys; "Grok API" keys (`xai-…`) do not work. Cursor answers an unknown `grok_…` key
+with `unauthenticated: Invalid Service Token`, an unknown key of another shape with `Invalid User API Key`. `vibechat --version` prints the
 version. Releases are built by CI from a `v*` tag.
 
 ## How it works

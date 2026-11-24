@@ -29,7 +29,13 @@ type Agent interface {
 	SandboxError() error
 	HasKey() bool
 	Me(ctx context.Context) (agent.Account, error)
-	ModelIDs(ctx context.Context) ([]string, error)
+	// CheckKey asks Cursor whether a key works before it is stored.
+	CheckKey(ctx context.Context, key string) (agent.Account, error)
+	// Models is the model menu of the current key (Cursor's list, nothing hard-coded); Select resolves a menu id;
+	// MarkUnavailable drops a model that failed with an access or plan error from this key's menu.
+	Models(ctx context.Context) ([]agent.Model, error)
+	Select(ctx context.Context, modelID string, params []agent.ModelParam) (agent.Selection, error)
+	MarkUnavailable(modelID string, err error) bool
 	EnsureAgent(ctx context.Context, agentID, cwd string, model agent.Selection) (string, error)
 	Send(ctx context.Context, agentID, text string, images []agent.Image, model agent.Selection, tr *agent.Translator, emit func(agent.Event)) error
 	Cancel(ctx context.Context, agentID, runID string) error

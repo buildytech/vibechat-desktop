@@ -5,11 +5,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
 
 	"github.com/buildytech/vibechat-desktop/internal/agent"
+	"github.com/buildytech/vibechat-desktop/internal/bridge"
 	"github.com/buildytech/vibechat-desktop/internal/store"
 	"github.com/buildytech/vibechat-desktop/internal/templates"
 )
@@ -29,9 +31,25 @@ func (f *fakeAgent) HasKey() bool        { return f.key }
 func (f *fakeAgent) Me(context.Context) (agent.Account, error) {
 	return agent.Account{APIKeyName: "test", UserEmail: "a@b.c"}, nil
 }
-func (f *fakeAgent) ModelIDs(context.Context) ([]string, error) {
-	return []string{"grok-4.7", "composer-2.5"}, nil
+func (f *fakeAgent) CheckKey(_ context.Context, key string) (agent.Account, error) {
+	if strings.HasPrefix(key, "grok_bad") {
+		return agent.Account{}, &bridge.Error{Code: "unauthenticated", Message: "Invalid Service Token"}
+	}
+	if strings.HasPrefix(key, "grok_offline") {
+		return agent.Account{}, errors.New("dial tcp: network is unreachable")
+	}
+	return agent.Account{APIKeyName: "test", UserEmail: "a@b.c"}, nil
 }
+func (f *fakeAgent) Models(context.Context) ([]agent.Model, error) {
+	return []agent.Model{{ID: agent.AutoID, Provider: "cursor", Label: "Auto"}, {ID: "cursor/composer-2.5-fast", Provider: "cursor", Label: "Composer 2.5 Fast"}}, nil
+}
+func (f *fakeAgent) Select(_ context.Context, id string, _ []agent.ModelParam) (agent.Selection, error) {
+	if id == "cursor/gone" {
+		return agent.Selection{}, agent.ErrUnknownModel
+	}
+	return agent.Selection{ID: strings.TrimPrefix(id, "cursor/")}, nil
+}
+func (f *fakeAgent) MarkUnavailable(id string, err error) bool { return agent.ModelAccessError(err) }
 func (f *fakeAgent) EnsureAgent(_ context.Context, id, cwd string, _ agent.Selection) (string, error) {
 	f.mu.Lock()
 	f.cwds = append(f.cwds, cwd)

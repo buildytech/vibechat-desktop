@@ -25,6 +25,18 @@ func TestChildEnvCarriesTheKeyOnlyOnce(t *testing.T) {
 	}
 }
 
+// An inherited CURSOR_BACKEND_URL (or any CURSOR_*) must not steer the bridge to another backend.
+func TestChildEnvDropsInheritedCursorVars(t *testing.T) {
+	base := []string{"PATH=/bin", "Cursor_Backend_Url=https://elsewhere", "CURSOR_DATA_DIR=/x", "HTTPS_PROXY=http://p:3128"}
+	joined := strings.Join(childEnv(base, "k", "/agent"), "\n")
+	if strings.Contains(joined, "elsewhere") || strings.Contains(joined, "CURSOR_DATA_DIR") || !strings.Contains(joined, "HTTPS_PROXY=") {
+		t.Fatalf("env: %q", joined)
+	}
+	if got := strings.Join(droppedCursorVars(base), ","); got != "Cursor_Backend_Url,CURSOR_DATA_DIR" {
+		t.Fatalf("dropped: %q", got)
+	}
+}
+
 func TestRedact(t *testing.T) {
 	if got := Redact("x key_123 y", "key_123"); got != "x [redacted] y" {
 		t.Fatal(got)

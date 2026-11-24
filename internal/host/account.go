@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -40,6 +41,10 @@ func (h *Host) meCursor(w http.ResponseWriter, r *http.Request, _ Params) {
 	defer cancel()
 	acc, err := h.opts.Agent.Me(ctx)
 	if err != nil {
+		if agent.IsUnauthenticated(err) {
+			WriteError(w, http.StatusUnauthorized, h.agentError("", err))
+			return
+		}
 		h.agentUnavailable(w, err)
 		return
 	}
@@ -82,15 +87,54 @@ func (h *Host) putCredential(w http.ResponseWriter, r *http.Request, p Params) {
 		Key string `json:"key"`
 	}
 	if err := readJSON(r, 8<<10, &body); err != nil || strings.TrimSpace(body.Key) == "" {
-		WriteError(w, http.StatusBadRequest, "Paste a Cursor API key")
+		WriteError(w, http.StatusBadRequest, "Paste a Cursor API key: "+secrets.WhereToGet)
 		return
 	}
-	if err := h.opts.Keys.Store(body.Key); err != nil {
+	key := strings.TrimSpace(body.Key)
+	if err := secrets.CheckFormat(key); err != nil {
+		WriteError(w, http.StatusBadRequest, "Not saved: "+err.Error()+".")
+		return
+	}
+	if f := secrets.Foreign(key); f != "" {
+		WriteError(w, http.StatusBadRequest, "Not saved: this is a "+f+" key, not a key of type Cursor; "+secrets.WhereToGet+".")
+		return
+	}
+	if err := h.opts.Keys.Store(key); err != nil {
 		WriteError(w, http.StatusInternalServerError, "Could not save the key in the system keychain: "+err.Error())
 		return
 	}
-	key, source := h.opts.Keys.Key()
-	WriteJSON(w, http.StatusOK, map[string]any{"credential": credentialJSON(key, source)})
+	stored, source := h.opts.Keys.Key()
+	out := map[string]any{"credential": credentialJSON(stored, source)}
+	// Online check through the bridge (Me). The key is kept either way: offline the check cannot decide, and a
+	// rejected key is reported with what to do instead of being thrown away.
+	if h.opts.Agent != nil && h.opts.Agent.SandboxError() == nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+		acc, err := h.opts.Agent.CheckKey(ctx, key)
+		cancel()
+		switch {
+		case err == nil:
+			out["account"] = map[string]any{"email": acc.UserEmail, "apiKeyName": acc.APIKeyName}
+			h.logf("key saved and accepted by Cursor (%s)", secrets.Describe(key, source))
+		case agent.IsUnauthenticated(err):
+			out["warning"] = secrets.AuthHint(key, source) + " Cursor said: " + err.Error()
+			h.logf("key saved but rejected by Cursor: %v (%s)", err, secrets.Describe(key, source))
+		default:
+			out["warning"] = "Saved, but Cursor could not check the key now: " + err.Error()
+			h.logf("key saved, not checked: %v (%s)", err, secrets.Describe(key, source))
+		}
+	}
+	WriteJSON(w, http.StatusOK, out)
+}
+
+// agentError is the user-facing text of an agent failure; a key Cursor rejected gets what to do about it.
+func (h *Host) agentError(prefix string, err error) string {
+	msg := prefix + err.Error()
+	if agent.IsUnauthenticated(err) && h.opts.Keys != nil {
+		key, source := h.opts.Keys.Key()
+		h.logf("cursor rejected the key: %v (%s)", err, secrets.Describe(key, source))
+		msg += "\n\n" + secrets.AuthHint(key, source)
+	}
+	return msg
 }
 
 func (h *Host) deleteCredential(w http.ResponseWriter, _ *http.Request, p Params) {
@@ -103,4 +147,10 @@ func (h *Host) deleteCredential(w http.ResponseWriter, _ *http.Request, p Params
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Host) logf(format string, args ...any) {
+	if h.opts.Log != nil {
+		h.opts.Log(fmt.Sprintf(format, args...))
+	}
 }
