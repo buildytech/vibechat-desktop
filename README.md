@@ -55,6 +55,9 @@ version. Releases are built by CI from a `v*` tag.
   with the platform helper `@cursor/sdk-<os>-<arch>` (`cursorsandbox`, `rg`) in `bin/node_modules/`. It listens on
   127.0.0.1 with a bearer token; the key reaches it only as `CURSOR_API_KEY` in its environment (never argv, a URL or a
   file). The catalog calls (`Me`, `ListModels`) need the key in their loopback request body; agent runs use the env.
+- **Editing keys belong to the page.** The Edit menu role is used only on macOS (a WKWebView needs it for Cmd+V). On
+  Windows and Linux it bound Ctrl+V/C/X/Z/A and Backspace as menu accelerators, so on Windows a Ctrl+V pasted twice
+  (the role's own paste on top of WebView2's). A message is stored and run once per `clientMsgId`; a repeat answers 409.
 - **The SDK sandbox is mandatory.** At start the host runs the helper's preflight; no bridge, no helper or a failed
   preflight turns `agent_sandbox` off and every prompt answers 503. **Exception: Windows.** cursor-sdk-bridge 1.2.0
   refuses a sandboxed local agent on win32 ("Local SDK sandboxing was requested, but sandboxing is not supported in

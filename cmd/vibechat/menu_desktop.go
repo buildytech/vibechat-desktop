@@ -21,9 +21,17 @@ func appMenu(app *application.App, window func() *application.WebviewWindow) *ap
 			w.Focus()
 		}
 	}
-	label := settingsLabel(os.Getenv)
-	menu := app.NewMenu()
-	if goruntime.GOOS == "darwin" {
+	return buildMenu(goruntime.GOOS, settingsLabel(os.Getenv), openSettings)
+}
+
+// buildMenu has the Edit role only on macOS. On Windows (and Linux) the role binds Ctrl+V/C/X/Z/A and Backspace as
+// menu accelerators: on Windows each Ctrl+V ran the role's own paste (navigator.clipboard + insertText) besides
+// WebView2's, so a paste landed twice (the owner's report; the right-click menu pasted once), and Backspace went to
+// the Delete item. WebView2 and WebKitGTK handle the editing keys themselves and have a context menu; macOS needs
+// the role, or Cmd+V does nothing in a WKWebView.
+func buildMenu(goos, label string, openSettings func(*application.Context)) *application.Menu {
+	menu := application.NewMenu()
+	if goos == "darwin" {
 		appSub := menu.AddSubmenu(appid.Name)
 		appSub.AddRole(application.About)
 		appSub.AddSeparator()
@@ -34,13 +42,13 @@ func appMenu(app *application.App, window func() *application.WebviewWindow) *ap
 		appSub.AddRole(application.ShowAll)
 		appSub.AddSeparator()
 		appSub.AddRole(application.Quit)
+		menu.AddRole(application.EditMenu)
 	} else {
 		file := menu.AddSubmenu("File")
 		file.Add(label).SetAccelerator(settingsAccelerator).OnClick(openSettings)
 		file.AddSeparator()
 		file.AddRole(application.Quit)
 	}
-	menu.AddRole(application.EditMenu)
 	menu.AddRole(application.ViewMenu)
 	menu.AddRole(application.WindowMenu)
 	return menu

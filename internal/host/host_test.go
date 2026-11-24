@@ -147,6 +147,31 @@ func TestSessionsWorkInWorktreesAndLandOnMain(t *testing.T) {
 	}
 }
 
+// A message sent twice with the same clientMsgId (the owner's Windows double send) is stored and run once.
+func TestSameClientMessageRunsOnce(t *testing.T) {
+	e := newEnv(t, pinnedSeam(t), true)
+	pid := mustProject(t, e, "once")["id"].(string)
+	_, a := call(t, e.host, "POST", "/projects/"+pid+"/agent/sessions", nil)
+	sid := a["session"].(map[string]any)["id"].(string)
+	send := func() (int, map[string]any) {
+		return call(t, e.host, "POST", "/projects/"+pid+"/agent/sessions/"+sid+"/messages", map[string]any{"text": "alpha", "modelId": "cursor/grok-4.7",
+			"modelParams": []map[string]string{{"id": "reasoning_effort", "value": "xhigh"}}, "clientMsgId": "u-1"})
+	}
+	if code, out := send(); code != 200 || out["status"] != "idle" {
+		t.Fatalf("%d %v", code, out)
+	}
+	if code, _ := send(); code != 409 {
+		t.Fatalf("repeat answered %d", code)
+	}
+	if len(e.agent.cwds) != 1 {
+		t.Fatalf("agent ran %d times", len(e.agent.cwds))
+	}
+	_, tx := call(t, e.host, "GET", "/projects/"+pid+"/agent/sessions/"+sid+"/messages", nil)
+	if msgs := tx["messages"].([]any); len(msgs) != 2 {
+		t.Fatalf("%v", msgs)
+	}
+}
+
 func TestPromptFailsClosed(t *testing.T) {
 	e := newEnv(t, pinnedSeam(t), false)
 	pid := mustProject(t, e, "closed")["id"].(string)

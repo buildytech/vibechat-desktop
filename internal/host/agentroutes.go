@@ -254,8 +254,14 @@ func (h *Host) prompt(w http.ResponseWriter, r *http.Request, prm Params) {
 		h.mu.Unlock()
 	}()
 
-	if _, err := h.opts.Store.Append(store.Message{SessionID: s.ID, Role: "user", Content: body.Text, ClientID: body.ClientMsgID, RunID: runID}); err != nil {
+	row, err := h.opts.Store.Append(store.Message{SessionID: s.ID, Role: "user", Content: body.Text, ClientID: body.ClientMsgID, RunID: runID})
+	if err != nil {
 		WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// The same clientMsgId again (a double Enter/click or a repeated request): the message is stored once and runs once.
+	if row.RunID != runID {
+		WriteError(w, http.StatusConflict, "This message was already sent")
 		return
 	}
 	if s.Title == "" {
