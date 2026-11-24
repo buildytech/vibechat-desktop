@@ -3,6 +3,7 @@
 package main
 
 import (
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -32,6 +33,9 @@ func TestMenuLeavesEditingKeysToThePage(t *testing.T) {
 	accelerators(role, control)
 	if control["ctrl+v"] != "Paste" || control["backspace"] == "" {
 		t.Fatalf("the check no longer sees the Edit role's keys: %v", control)
+	}
+	if goruntime.GOOS == "darwin" {
+		t.Skip("macOS role menus need a running app; the Windows and Linux runners check this")
 	}
 	for _, goos := range []string{"windows", "linux"} {
 		got := map[string]string{}
