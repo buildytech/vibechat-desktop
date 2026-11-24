@@ -95,8 +95,27 @@ func setupLog(data string) string {
 	if err != nil {
 		return ""
 	}
-	log.SetOutput(io.MultiWriter(os.Stderr, f))
+	log.SetOutput(&logWriter{file: f, console: os.Stderr})
 	return file
+}
+
+// logWriter writes every log line to the file first and syncs it, then to the console. A windowsgui app has no
+// valid stderr: io.MultiWriter(os.Stderr, f) stopped at that error and never wrote the file (an empty vibechat.log).
+type logWriter struct {
+	mu      sync.Mutex
+	file    *os.File
+	console io.Writer
+}
+
+func (w *logWriter) Write(b []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.file.Write(b)
+	_ = w.file.Sync()
+	if w.console != nil {
+		_, _ = w.console.Write(b) // ignored: no console in the GUI build
+	}
+	return n, err
 }
 
 type fixedKey string

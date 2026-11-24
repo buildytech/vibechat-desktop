@@ -113,7 +113,11 @@ func Start(ctx context.Context, o StartOptions) (*Process, error) {
 	select {
 	case ready = <-readyCh:
 	case <-p.done:
-		return nil, exitedEarly(p, tail)
+		err := exitedEarly(p, tail)
+		if o.Log != nil { // the log file must keep it even when the UI shows only the first line
+			o.Log("bridge: " + err.Error() + " [" + o.Install.Executable() + "]")
+		}
+		return nil, err
 	case <-time.After(timeout):
 		p.kill()
 		return nil, errors.New("cursor-sdk-bridge did not become ready")
@@ -139,11 +143,7 @@ func Start(ctx context.Context, o StartOptions) (*Process, error) {
 
 // exitedEarly explains a bridge that died before its ready line: exit code and the last output lines (redacted).
 func exitedEarly(p *Process, tail *tailLines) error {
-	code := "unknown"
-	if p.cmd.ProcessState != nil {
-		code = fmt.Sprint(p.cmd.ProcessState.ExitCode())
-	}
-	msg := fmt.Sprintf("cursor-sdk-bridge exited before it was ready (exit code %s)", code)
+	msg := fmt.Sprintf("cursor-sdk-bridge exited before it was ready (exit code %s)", DescribeExit(p.cmd.ProcessState))
 	if t := tail.String(); t != "" {
 		msg += ":\n" + t
 	} else if p.waitErr != nil {
