@@ -1,4 +1,4 @@
-// BuildY VibeChat desktop: the vibecode Studio in a Wails 3 window, with its host seam (/runtime/v1/*) answered in
+// BuildY VibeChat desktop: the BuildY Studio in a Wails 3 window, with its host seam (/runtime/v1/*) answered in
 // process by Go. Build tags: none for the desktop app, `server` for the headless HTTP mode (tests, the exam).
 //
 //	vibechat              open the app
@@ -65,7 +65,7 @@ func main() {
 
 	app := application.New(application.Options{
 		Name:        appid.Name,
-		Description: "BuildY VibeChat desktop (the vibecode Studio in a Wails window)",
+		Description: "BuildY VibeChat desktop (the BuildY Studio in a Wails window)",
 		Mac:         application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
 		// The WebView2 data (the Studio's local state) lives under the fixed app id, not the binary name.
 		Windows: application.WindowsOptions{WebviewUserDataPath: webviewDataDir()},

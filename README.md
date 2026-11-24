@@ -1,16 +1,20 @@
 # BuildY VibeChat desktop
 
-The [BuildY VibeCode](https://github.com/buildytech/vibecode) Studio as a desktop app on [Wails 3](https://wails.io)
+The [BuildY Studio](https://github.com/buildytech/studio) as a desktop app on [Wails 3](https://wails.io)
 (v3.1.0), for one user with their own Cursor API key.
 
-This repository is **only the Go backend and the build**. The Studio, Agent Contract v1, the host seam and the
-templates live in `buildytech/vibecode` and come in as the git submodule `third_party/vibecode`, pinned by commit.
-Nothing in the submodule is edited here; a Studio change reaches the desktop app by moving the pin
-([vibecode ADR-0027](https://github.com/buildytech/vibecode/blob/main/.project/adr/0027-desktop-host-seam.md)).
+This repository is **only the Go backend and the build**. Two public git submodules, pinned by commit:
+
+- `third_party/studio` = [buildytech/studio](https://github.com/buildytech/studio): the Studio, Agent Contract v1 and
+  the host seam (`packages/agent-contract/host-seam.json`, [ADR 0002](https://github.com/buildytech/studio/blob/main/docs/adr/0002-host-seam-contract.md));
+- `third_party/templates` = [buildytech/templates](https://github.com/buildytech/templates): `vite-svelte-bun` and
+  `vite-react-bun`.
+
+Nothing in a submodule is edited here; a Studio or template change reaches the desktop app by moving the pin.
 
 ## How it works
 
-- The window loads the built Studio (`apps/web` `build:desktop`), embedded in the binary (`frontend/dist`, made by
+- The window loads the built Studio (`apps/studio` `build:desktop`), embedded in the binary (`frontend/dist`, made by
   `scripts/build-frontend.sh`).
 - The Studio calls the host with `fetch("/runtime/v1/...")`. The Wails asset-server middleware answers those paths in
   Go, in process, on the app's own origin (`internal/host`). The route list is the pinned
@@ -41,7 +45,7 @@ Nothing in the submodule is edited here; a Studio change reaches the desktop app
 
 - Projects live in `~/VibeChat/<name>` (`VIBECHAT_PROJECTS_DIR`), state in `<UserConfigDir>/tw.buildy.vibechat`
   (`VIBECHAT_DATA_DIR`). Each project is a git repository (`main`) scaffolded from a template embedded from the
-  vibecode submodule.
+  templates submodule.
 - Every chat works in its own git worktree, `<data>/worktrees/<project>/<chat>` on branch `vibe/<chat>`, outside the
   project folder. Before a run the worktree takes in `main`; after it the host commits the run and merges it into
   `main` (the project folder, where the preview runs). A conflict leaves the work on the branch and says so. Deleting
@@ -65,7 +69,7 @@ Requirements: Go 1.26+, Bun 1.4 (the Studio build), and on Linux `pkg-config lib
 ```bash
 git clone --recurse-submodules https://github.com/buildytech/vibechat-desktop
 cd vibechat-desktop
-bash scripts/build-frontend.sh               # bun install + build:desktop in third_party/vibecode → frontend/dist
+bash scripts/build-frontend.sh               # bun install + build:desktop in third_party/studio → frontend/dist
 go build -o bin/vibechat ./cmd/vibechat      # the desktop app
 bin/vibechat --set-key                       # paste the Cursor key on stdin, kept in the OS keychain
 bin/vibechat

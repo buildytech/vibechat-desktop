@@ -19,7 +19,7 @@ func pinnedSeam(t *testing.T) Seam {
 	return s
 }
 
-// TestHostSeamContract runs every route of the pinned vibecode host-seam.json against the host: each answers JSON
+// TestHostSeamContract runs every route of the pinned studio host-seam.json against the host: each answers JSON
 // with { error } or a body, never a blank page or an HTML fallback.
 func TestHostSeamContract(t *testing.T) {
 	s := pinnedSeam(t)

@@ -1,4 +1,4 @@
-// Package templates scaffolds projects from the vibecode templates the desktop host ships (embedded from the pinned
+// Package templates scaffolds projects from the buildytech/templates the desktop host ships (embedded from the pinned
 // submodule) and knows each template's desktop profile: how the host installs dependencies (outside the agent
 // sandbox, with network), runs the dev server for the preview on a loopback port, and builds.
 package templates

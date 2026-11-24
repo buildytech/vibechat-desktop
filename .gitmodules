@@ -1,3 +1,6 @@
-[submodule "third_party/vibecode"]
-	path = third_party/vibecode
-	url = https://github.com/buildytech/vibecode
+[submodule "third_party/studio"]
+	path = third_party/studio
+	url = https://github.com/buildytech/studio
+[submodule "third_party/templates"]
+	path = third_party/templates
+	url = https://github.com/buildytech/templates

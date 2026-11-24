@@ -1,4 +1,4 @@
-// Package webapp serves the built vibecode Studio (apps/web `build:desktop`, a Vite SPA): a file when it exists, else
+// Package webapp serves the built Studio (buildytech/studio apps/studio `build:desktop`, a Vite SPA): a file when it exists, else
 // the SPA fallback index.html, so client routes (/p/:id, /settings) load the app.
 package webapp
 

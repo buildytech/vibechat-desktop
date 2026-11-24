@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Event is one Agent Contract v1 AgentEvent (vibecode packages/agent-contract), as sent over SSE.
+// Event is one Agent Contract v1 AgentEvent (studio packages/agent-contract), as sent over SSE.
 type Event map[string]any
 
 const (

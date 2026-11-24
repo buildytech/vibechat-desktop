@@ -13,7 +13,7 @@ import (
 	"github.com/buildytech/vibechat-desktop/internal/templates"
 )
 
-// Capabilities is HostCapabilities of the seam (vibecode packages/agent-contract/src/host.ts).
+// Capabilities is HostCapabilities of the seam (studio packages/agent-contract/src/host.ts).
 type Capabilities struct {
 	Seam         string `json:"seam"`
 	Version      string `json:"version"`

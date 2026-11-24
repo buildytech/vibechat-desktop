@@ -1,4 +1,4 @@
-// Package host answers the vibecode host seam (ADR-0027 in buildytech/vibecode,
+// Package host answers the Studio host seam (docs/adr/0002 in buildytech/studio,
 // packages/agent-contract/host-seam.json) inside the desktop app: the Studio's fetch("/runtime/v1/...") reaches it
 // through the Wails asset-server middleware, in process, on the app's own origin. The Cursor key stays here.
 package host
@@ -59,7 +59,7 @@ func NewRouter(seam Seam) *Router {
 }
 
 // Handle registers h for "METHOD /path"; it panics when the route is not in the seam (a host must not invent routes
-// the Studio does not know; add them to vibecode first).
+// the Studio does not know; add them to buildytech/studio first).
 func (rt *Router) Handle(key string, h HandlerFunc) {
 	for _, r := range rt.seam.Routes {
 		if r.Key() == key {
