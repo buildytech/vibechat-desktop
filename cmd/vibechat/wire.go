@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -117,6 +118,10 @@ func bridgeSmoke() int {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	url, err := runner.Probe(ctx)
+	if errors.Is(err, agent.ErrSandboxUnsupported) {
+		fmt.Printf("bridge smoke: SKIP (no SDK sandbox on this machine): %v\nlog: %s\n", err, logFile)
+		return 3
+	}
 	if err != nil {
 		fmt.Printf("bridge smoke: FAIL: %v\nlog: %s\n", err, logFile)
 		return 1

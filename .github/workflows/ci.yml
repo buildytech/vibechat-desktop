@@ -49,7 +49,6 @@ jobs:
         with:
           bun-version: 1.3.3
       - name: Templates install e2e run (Bun 1.3.3)
-        continue-on-error: true # TEMP: repro with the old v2 lockfile pin; removed with the templates bump
         run: |
           bun --version
           d="$RUNNER_TEMP/Профиль пользователя/VibeChat 133"
@@ -102,6 +101,23 @@ jobs:
           set -e
           cat smoke.txt
           echo "--- log"; cat "$VIBECHAT_DATA_DIR/logs/vibechat.log" || true
+          # 3 = the runner has no SDK sandbox (GitHub Linux runners lack Landlock); the bridge is not started then.
+          if [ "$code" = 3 ] && [ "$RUNNER_OS" = Linux ]; then echo "::warning::bridge smoke skipped: no SDK sandbox on this runner"; exit 0; fi
+          exit $code
+      # The NSIS installer layout (per-machine, Program Files, read-only for the user): the same smoke from there.
+      - name: Bridge smoke from the installed app (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          powershell -NoProfile -Command "Start-Process -FilePath dist\vibechat-amd64-installer.exe -ArgumentList '/S' -Wait"
+          exe="/c/Program Files/BuildY/BuildY VibeChat/vibechat.exe"
+          ls -la "$(dirname "$exe")" "$(dirname "$exe")/bridge"
+          unset VIBECHAT_DATA_DIR # the real default: %APPDATA%\tw.buildy.vibechat
+          set +e
+          "$exe" --bridge-smoke > smoke-installed.txt 2>&1
+          code=$?
+          set -e
+          cat smoke-installed.txt
+          echo "--- log"; cat "$APPDATA/tw.buildy.vibechat/logs/vibechat.log" || true
           exit $code
       # The bare executable with the agent runtime next to it (bin/bridge: cursor-sdk-bridge + sandbox helper).
       - uses: actions/upload-artifact@v4

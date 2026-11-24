@@ -53,6 +53,9 @@ func NewRunner(o RunnerOptions) *Runner {
 	return r
 }
 
+// ErrSandboxUnsupported means the OS lacks the kernel features of the SDK sandbox (preflight exit 2).
+var ErrSandboxUnsupported = errors.New("this system does not support the agent sandbox")
+
 // ErrNoKey means no Cursor key is configured.
 var ErrNoKey = errors.New("No Cursor API key configured — add one in Settings")
 
@@ -68,7 +71,7 @@ func (r *Runner) checkSandbox() error {
 		pre = preflight
 	}
 	if err := pre(r.o.Install.SandboxHelper()); err != nil {
-		return fmt.Errorf("sandbox preflight failed: %v", err)
+		return fmt.Errorf("sandbox preflight failed: %w", err)
 	}
 	if err := sandbox.WriteHome(r.home(), r.o.HookExe, RuntimeReadPaths(exec.LookPath)); err != nil {
 		return fmt.Errorf("agent home: %v", err)
@@ -104,7 +107,7 @@ func preflight(helper string) error {
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && ee.ExitCode() == 2 {
-			return fmt.Errorf("this system does not support the agent sandbox: %s", strings.TrimSpace(string(out)))
+			return fmt.Errorf("%w: %s", ErrSandboxUnsupported, strings.TrimSpace(string(out)))
 		}
 		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 	}

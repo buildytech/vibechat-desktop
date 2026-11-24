@@ -27,7 +27,16 @@ func InstallDeps(ctx context.Context, dir string, tpl templates.Profile, log fun
 			return err
 		}
 	}
-	return runTool(ctx, dir, tpl.Install, nil, log)
+	err := runTool(ctx, dir, tpl.Install, nil, log)
+	if err != nil && strings.Contains(err.Error(), "Fail extracting tarball") && ctx.Err() == nil {
+		// Bun on Windows can fail to extract into its cache while another process (antivirus, indexer) holds a
+		// freshly written file; the cache is consistent again on a second run.
+		if log != nil {
+			log("bun install: tarball extraction failed, retrying once")
+		}
+		err = runTool(ctx, dir, tpl.Install, nil, log)
+	}
+	return err
 }
 
 // minBun reads `"engines": {"bun": ">=X.Y.Z"}` from dir/package.json ("" when not set).
