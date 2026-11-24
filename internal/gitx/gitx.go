@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/buildytech/vibechat-desktop/internal/procgroup"
 )
 
 // Run runs git -C dir args… and answers trimmed stdout.
@@ -17,7 +19,7 @@ func Run(ctx context.Context, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	full := append([]string{"-C", dir, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main", "-c", "core.autocrlf=false"}, args...)
-	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd := procgroup.CommandContext(ctx, "git", full...)
 	cmd.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=VibeChat", "GIT_AUTHOR_EMAIL=vibechat@localhost",
 		"GIT_COMMITTER_NAME=VibeChat", "GIT_COMMITTER_EMAIL=vibechat@localhost",

@@ -20,3 +20,6 @@ func killGroup(cmd *exec.Cmd) { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKI
 
 // attach: on Unix the group is set at fork (Setpgid), nothing to do after Start.
 func attach(*exec.Cmd) {}
+
+// hideConsole: Unix children have no console window.
+func hideConsole(*exec.Cmd) {}

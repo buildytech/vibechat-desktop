@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/buildytech/vibechat-desktop/internal/procgroup"
@@ -17,7 +16,7 @@ func runToolOutput(ctx context.Context, dir string, argv []string, env []string,
 	if len(argv) == 0 {
 		return nil
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd := procgroup.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
 	procgroup.Prepare(cmd)

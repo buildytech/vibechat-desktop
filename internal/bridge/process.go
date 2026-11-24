@@ -64,7 +64,7 @@ func Start(ctx context.Context, o StartOptions) (*Process, error) {
 			return nil, err
 		}
 	}
-	cmd := exec.Command(o.Install.Executable(), "--host", "127.0.0.1", "--port", "0", "--state-root", o.StateRoot)
+	cmd := procgroup.Command(o.Install.Executable(), "--host", "127.0.0.1", "--port", "0", "--state-root", o.StateRoot)
 	cmd.Dir = o.Home
 	cmd.Env = childEnv(o.Env, o.Key, o.Home)
 	procgroup.Prepare(cmd)

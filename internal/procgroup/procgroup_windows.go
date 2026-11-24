@@ -20,10 +20,16 @@ const createNoWindow = 0x08000000
 var jobs sync.Map // int -> windows.Handle
 
 func prepare(cmd *exec.Cmd) {
+	hideConsole(cmd)
+	cmd.SysProcAttr.CreationFlags |= createNewProcessGroup
+}
+
+// hideConsole: a console child of the windowsgui app would otherwise open its own console window for a moment.
+func hideConsole(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
-	cmd.SysProcAttr.CreationFlags |= createNewProcessGroup | createNoWindow
+	cmd.SysProcAttr.CreationFlags |= createNoWindow
 	cmd.SysProcAttr.HideWindow = true
 }
 
@@ -72,7 +78,5 @@ func taskkill(cmd *exec.Cmd, force bool) {
 	if force {
 		args = append([]string{"/F"}, args...)
 	}
-	k := exec.Command("taskkill", args...)
-	k.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
-	_ = k.Run()
+	_ = Command("taskkill", args...).Run()
 }

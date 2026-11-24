@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/buildytech/vibechat-desktop/internal/bridge"
+	"github.com/buildytech/vibechat-desktop/internal/procgroup"
 	"github.com/buildytech/vibechat-desktop/internal/sandbox"
 )
 
@@ -97,7 +98,7 @@ func preflight(helper string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, helper, append([]string{"--policy", file, "--preflight-only", "--"}, noop...)...)
+	cmd := procgroup.CommandContext(ctx, helper, append([]string{"--policy", file, "--preflight-only", "--"}, noop...)...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {

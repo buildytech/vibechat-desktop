@@ -151,7 +151,7 @@ func (m *Manager) Ensure(id, dir string, p templates.Profile) (host.PreviewStatu
 	}
 	proxyPort := ln.Addr().(*net.TCPAddr).Port
 	argv := templates.Expand(p.Dev, devPort, proxyPort)
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd := procgroup.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir
 	cmd.Env = append([]string{}, m.environ...)
 	for k, v := range p.DevEnv {
