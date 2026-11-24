@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -216,6 +217,18 @@ type view struct {
 }
 
 func (t *Translator) rel(p string) string {
+	// Slash-rooted paths (the SDK sandbox, POSIX hosts) are relativized the same way on every OS; filepath on Windows
+	// does not treat "/W/ws" as absolute.
+	if strings.HasPrefix(p, "/") && strings.HasPrefix(t.Cwd, "/") {
+		cp, cc := path.Clean(p), path.Clean(t.Cwd)
+		if cp == cc {
+			return "."
+		}
+		if r := strings.TrimPrefix(cp, strings.TrimSuffix(cc, "/")+"/"); r != cp {
+			return r
+		}
+		return p
+	}
 	if t.Cwd != "" && filepath.IsAbs(p) {
 		if r, err := filepath.Rel(t.Cwd, p); err == nil && !strings.HasPrefix(r, "..") {
 			return filepath.ToSlash(r)

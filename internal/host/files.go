@@ -87,7 +87,7 @@ func (h *Host) listFiles(w http.ResponseWriter, _ *http.Request, prm Params) {
 // resolveInProject maps a workspace-relative path to an absolute one inside the project (no .., no symlink escape).
 func resolveInProject(root, rel string) (string, bool) {
 	rel = strings.TrimSpace(rel)
-	if rel == "" || filepath.IsAbs(rel) || strings.Contains(rel, "\x00") {
+	if rel == "" || filepath.IsAbs(rel) || strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, `\`) || filepath.VolumeName(rel) != "" || strings.Contains(rel, "\x00") {
 		return "", false
 	}
 	abs := filepath.Join(root, filepath.FromSlash(rel))
