@@ -35,8 +35,12 @@ func main() {
 	}
 	setKey := flag.Bool("set-key", false, "read the Cursor API key from stdin and store it in the OS keychain")
 	forgetKey := flag.Bool("forget-key", false, "remove the Cursor API key from the OS keychain")
+	showVersion := flag.Bool("version", false, "print the app version and exit")
 	flag.Parse()
 	switch {
+	case *showVersion:
+		fmt.Println(appid.Name, appid.Version)
+		return
 	case *setKey:
 		fmt.Fprintln(os.Stderr, "Paste the Cursor API key and press Enter:")
 		line, err := bufio.NewReader(os.Stdin).ReadString('\n')

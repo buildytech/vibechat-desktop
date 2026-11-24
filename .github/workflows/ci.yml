@@ -2,6 +2,8 @@ name: ci
 on:
   push:
     branches: [main]
+    # A v* tag builds the same matrix and publishes a GitHub Release with the portable zips (job release).
+    tags: ["v*"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -10,11 +12,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # macos-15 runners are Apple Silicon (arm64): the macOS zip is the arm64 build.
         os: [ubuntu-24.04, macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
     env:
-      # The app version: scripts/package.sh and the desktop build stamp it (internal/appid.Version).
-      VIBECHAT_VERSION: 0.1.0
+      # The app version: scripts/package.sh and the desktop build stamp it (internal/appid.Version); a v* tag wins.
+      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.1.0' }}
     defaults:
       run:
         shell: bash
@@ -51,8 +54,11 @@ jobs:
             echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
           fi
           if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get install -y dpkg-dev file >/dev/null; fi
-      - name: Unsigned installers (scripts/package.sh)
-        run: bash scripts/package.sh
+      - name: Unsigned installers and portable zips (scripts/package.sh)
+        run: |
+          export VIBECHAT_VERSION="${VIBECHAT_VERSION#v}"
+          bash scripts/package.sh
+          ls dist/vibechat-desktop-*.zip
       # The bare executable with the agent runtime next to it (bin/bridge: cursor-sdk-bridge + sandbox helper).
       - uses: actions/upload-artifact@v4
         with:
@@ -68,3 +74,46 @@ jobs:
           name: vibechat-installer-${{ matrix.os }}
           path: dist/
           retention-days: 14
+
+  # Tag v* → GitHub Release with stable asset names, so
+  # https://github.com/buildytech/vibechat-desktop/releases/latest/download/<name> always points at the newest build.
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vibechat-installer-*
+          path: dist
+          merge-multiple: true
+      - name: Release notes
+        run: |
+          cat > notes.md <<'EOF'
+          Portable builds (unzip and run; the agent runtime `bridge/` sits next to the executable):
+
+          | System | Download | Requirements |
+          |---|---|---|
+          | Linux x64 | [vibechat-desktop-linux-x64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-linux-x64.zip) | GTK 4 + WebKitGTK 6 (`sudo apt install libgtk-4-1 libwebkitgtk-6.0-4`), Ubuntu 24.04 / Debian 13 or newer |
+          | Windows x64 | [vibechat-desktop-windows-x64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-windows-x64.zip) | Windows 10/11 x64 with Microsoft Edge WebView2 (the installer adds it if missing) |
+          | macOS Apple Silicon | [vibechat-desktop-macos-arm64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-macos-arm64.zip) | macOS 12+ on M1 or newer |
+
+          Installers are attached too: `.deb` (Linux), `vibechat-amd64-installer.exe` (Windows), `.dmg` (macOS).
+
+          Builds are **not signed or notarized**.
+          - macOS: after unzipping, run `xattr -dr com.apple.quarantine "BuildY VibeChat.app"` (or right-click → Open).
+          - Windows: SmartScreen may warn — «More info» → «Run anyway».
+
+          Then `vibechat --set-key` (paste the Cursor API key, kept in the OS keychain) or set it in Settings.
+          EOF
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "BuildY VibeChat $GITHUB_REF_NAME" --notes-file notes.md \
+            dist/vibechat-desktop-linux-x64.zip dist/vibechat-desktop-windows-x64.zip dist/vibechat-desktop-macos-arm64.zip \
+            dist/*.deb dist/vibechat-amd64-installer.exe "dist/BuildY VibeChat.dmg"

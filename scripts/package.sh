@@ -6,7 +6,11 @@
 # and bin/: the bare executable with bin/bridge next to it (CI uploads bin/ as is).
 # The agent runtime (cursor-sdk-bridge + the SDK sandbox helper) is downloaded and verified by cmd/fetch-bridge
 # (bridge.lock.json): without it the app runs but the agent stays off (fail closed). No AppImage: it cannot carry
-# the bridge yet. No zip packaging.
+# the bridge yet.
+# Portable zips with stable names (GitHub Release assets, links .../releases/latest/download/<name>):
+#   vibechat-desktop-linux-x64.zip    vibechat-desktop-linux-x64/{vibechat, bridge/}
+#   vibechat-desktop-windows-x64.zip  vibechat-desktop-windows-x64/{vibechat.exe, bridge\}
+#   vibechat-desktop-macos-arm64.zip  BuildY VibeChat.app (ditto: keeps the ad-hoc signature and symlinks)
 # Needs: Go, the wails3 CLI (WAILS3, default wails3), frontend/dist built (scripts/build-frontend.sh), and per OS:
 # GTK 4 + WebKitGTK 6 dev files (Linux), makensis (Windows), Xcode command line tools (macOS).
 # Identity: internal/appid (fixed: tw.buildy.vibechat). Nothing here signs or notarizes; see README "Signing".
@@ -20,6 +24,12 @@ TAGS="production"
 LDFLAGS="-s -w -X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VERSION"
 [ -f frontend/dist/index.html ] || { echo "package: frontend/dist missing (scripts/build-frontend.sh)" >&2; exit 1; }
 rm -rf bin dist && mkdir -p bin dist
+# portable <dir> <executable>: bin/<dir>/ with the executable and the agent runtime next to it.
+portable() {
+	mkdir -p "bin/$1"
+	cp "$2" "bin/$1/"
+	cp -R bin/bridge "bin/$1/bridge"
+}
 go run ./cmd/fetch-bridge -out bin/bridge -cache "${BRIDGE_CACHE:-.bridge-cache}"
 case "$(uname -s)" in
 Linux)
@@ -27,6 +37,8 @@ Linux)
 	go build -tags "$TAGS" -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o bin/vibechat ./cmd/vibechat
 	"$WAILS3" tool package -name vibechat -format deb -config build/linux/nfpm/nfpm.yaml -out dist
 	mv dist/vibechat.deb "dist/vibechat_${VERSION}_amd64.deb"
+	portable vibechat-desktop-linux-x64 bin/vibechat
+	(cd bin && zip -qry ../dist/vibechat-desktop-linux-x64.zip vibechat-desktop-linux-x64)
 	;;
 MINGW* | MSYS* | CYGWIN*)
 	export GOOS=windows GOARCH=amd64 CGO_ENABLED=0
@@ -36,6 +48,12 @@ MINGW* | MSYS* | CYGWIN*)
 	"$WAILS3" generate webview2bootstrapper -dir build/windows/nsis
 	(cd build/windows/nsis && makensis -V2 -DINFO_PRODUCTVERSION="$VERSION" -DARG_WAILS_AMD64_BINARY="$(cygpath -w "$PWD/../../../bin/vibechat.exe")" -DARG_BRIDGE_DIR="$(cygpath -w "$PWD/../../../bin/bridge")" project.nsi)
 	mv bin/vibechat-amd64-installer.exe dist/
+	portable vibechat-desktop-windows-x64 bin/vibechat.exe
+	if command -v 7z >/dev/null; then
+		(cd bin && 7z a -tzip -bso0 -bsp0 ../dist/vibechat-desktop-windows-x64.zip vibechat-desktop-windows-x64)
+	else
+		powershell -NoProfile -Command "Compress-Archive -Path bin/vibechat-desktop-windows-x64 -DestinationPath dist/vibechat-desktop-windows-x64.zip"
+	fi
 	rm -f build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
 	;;
 Darwin)
@@ -53,6 +71,8 @@ Darwin)
 	codesign --verify --deep --strict "$app"
 	"$WAILS3" tool package -format dmg -name "BuildY VibeChat" -out bin -background build/darwin/dmg-background.png -volume-icon build/darwin/icons.icns -file-icon build/darwin/dmg-file-icon.icns
 	mv "bin/BuildY VibeChat.dmg" dist/
+	[ "$(uname -m)" = "arm64" ] || { echo "package: the macOS zip is the arm64 build; run on Apple Silicon" >&2; exit 1; }
+	ditto -c -k --sequesterRsrc --keepParent "$app" dist/vibechat-desktop-macos-arm64.zip
 	;;
 *)
 	echo "package: unsupported system $(uname -s)" >&2

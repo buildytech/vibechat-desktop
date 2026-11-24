@@ -12,6 +12,24 @@ This repository is **only the Go backend and the build**. Two public git submodu
 
 Nothing in a submodule is edited here; a Studio or template change reaches the desktop app by moving the pin.
 
+## Скачать / Download
+
+Portable zips of the latest release (unzip and run; `bridge/` — the agent runtime — must stay next to the executable):
+
+- **Linux x64**: [vibechat-desktop-linux-x64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-linux-x64.zip)
+  — GTK 4 + WebKitGTK 6 (`sudo apt install libgtk-4-1 libwebkitgtk-6.0-4`; Ubuntu 24.04 / Debian 13 or newer).
+  Run `./vibechat-desktop-linux-x64/vibechat`.
+- **Windows x64**: [vibechat-desktop-windows-x64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-windows-x64.zip)
+  — Windows 10/11 64-bit with Microsoft Edge WebView2 (preinstalled on Windows 11). Run `vibechat.exe`; the
+  unsigned build may trigger SmartScreen: «More info» → «Run anyway».
+- **macOS Apple Silicon (M1+)**: [vibechat-desktop-macos-arm64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-macos-arm64.zip)
+  — macOS 12+. The app is not notarized: after unzipping run
+  `xattr -dr com.apple.quarantine "BuildY VibeChat.app"` (or right-click → Open).
+
+Installers (`.deb`, NSIS `.exe`, `.dmg`) are on the [releases page](https://github.com/buildytech/vibechat-desktop/releases/latest).
+A Cursor API key is needed for the agent: Settings in the app, or `vibechat --set-key`. `vibechat --version` prints the
+version. Releases are built by CI from a `v*` tag.
+
 ## How it works
 
 - The window loads the built Studio (`apps/studio` `build:desktop`), embedded in the binary (`frontend/dist`, made by
@@ -100,7 +118,10 @@ Without it (or without a working sandbox) the app runs but the agent stays off.
 | Windows | `vibechat-amd64-installer.exe` (NSIS) | `<install dir>\bridge` |
 | macOS | `BuildY VibeChat.dmg` (ad-hoc signed `.app`) | `Contents/Resources/bridge` |
 
-CI uploads `vibechat-installer-<os>` (the installer) and `vibechat-<os>` (the bare executable + `bridge/`).
+It also writes the portable zip of that OS: `vibechat-desktop-linux-x64.zip`, `vibechat-desktop-windows-x64.zip`,
+`vibechat-desktop-macos-arm64.zip` (Apple Silicon only). CI uploads `vibechat-installer-<os>` (installer + zip) and
+`vibechat-<os>` (the bare executable + `bridge/`); a pushed `v*` tag also publishes a GitHub Release with the three
+zips and the installers under these stable names.
 
 ## Tests and the gate
 
