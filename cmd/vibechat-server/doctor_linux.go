@@ -25,5 +25,10 @@ func kernelChecks() []check {
 	} else {
 		cs = append(cs, ok("userns", "unprivileged user namespaces work"))
 	}
+	// Ubuntu 23.10+ (not Debian) lets unconfined processes create user namespaces without capabilities inside: the
+	// sandbox then fails at its loopback setup (RTM_NEWADDR: operation not permitted).
+	if raw, err := os.ReadFile("/proc/sys/kernel/apparmor_restrict_unprivileged_userns"); err == nil && strings.TrimSpace(string(raw)) == "1" {
+		cs = append(cs, warn("apparmor", "kernel.apparmor_restrict_unprivileged_userns=1 (Ubuntu): the sandbox cannot set up its network namespace; use Debian 13 or set it to 0"))
+	}
 	return cs
 }

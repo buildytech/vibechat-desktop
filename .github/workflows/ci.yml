@@ -112,8 +112,9 @@ jobs:
           curl -fsS -b jar http://127.0.0.1:18120/ | grep -qi '<html\|<!doctype'
           test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: x.preview.localhost:18121' http://127.0.0.1:18121/)" = 404
           rm -f "$RUNNER_TEMP/tok" jar
-          # GitHub runners lack Landlock: the doctor reports the sandbox and the server keeps the agent off.
-          sudo -u vibechat env VIBECHAT_DATA_DIR=/var/lib/vibechat vibechat-server doctor || echo "::warning::vibechat-server doctor reported FAIL (expected on GitHub runners without Landlock)"
+          # Ubuntu runners restrict unprivileged user namespaces (AppArmor): the sandbox preflight fails at its
+          # loopback setup, the doctor reports it and the server keeps the agent off (fail closed).
+          sudo -u vibechat env VIBECHAT_DATA_DIR=/var/lib/vibechat vibechat-server doctor || echo "::warning::vibechat-server doctor reported FAIL (expected on Ubuntu runners: AppArmor restricts user namespaces)"
           vibechat-server update --check || true
           sudo journalctl -u vibechat-server --no-pager | tail -20
       # Agent runtime smoke from the shipped zip: unpack under a path with spaces and Cyrillic, run the app's own
