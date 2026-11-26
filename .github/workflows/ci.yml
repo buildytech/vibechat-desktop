@@ -275,7 +275,7 @@ jobs:
           x64 builds run on any x86-64 CPU with SSE4.2 (no AVX/AVX2 needed): the agent runtime is compiled on the Bun
           *baseline* runtime and checked in CI under QEMU `-cpu Nehalem-v2`.
 
-          Installers are attached too: `.deb` (Linux), `vibechat-amd64-installer.exe` (Windows), `.dmg` (macOS).
+          Installers are attached too: `.deb` (Linux), `vibechat-amd64-installer.exe` (Windows), `BuildY-VibeChat.dmg` (macOS).
 
           Server (preview; requires Debian 13 "trixie" x86_64, Ubuntu and other systems are not supported for now; one
           Incus container per user):
@@ -320,9 +320,12 @@ jobs:
       - name: SHA256SUMS
         run: |
           cd dist
-          sha256sum -- vibechat-desktop-linux-x64.zip vibechat-desktop-windows-x64.zip vibechat-desktop-macos-arm64.zip \
-            *.deb vibechat-amd64-installer.exe "BuildY VibeChat.dmg" > SHA256SUMS
+          # Asset names must survive upload unchanged (GitHub turns a space into a dot), or sha256sum -c fails.
+          assets="vibechat-desktop-linux-x64.zip vibechat-desktop-windows-x64.zip vibechat-desktop-macos-arm64.zip $(ls *.deb) vibechat-amd64-installer.exe BuildY-VibeChat.dmg"
+          for f in $assets; do case "$f" in *[!A-Za-z0-9._-]*) echo "release: asset name GitHub would change: $f" >&2; exit 1 ;; esac; done
+          sha256sum -- $assets > SHA256SUMS
           cat SHA256SUMS
+          sha256sum -c SHA256SUMS
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -331,4 +334,14 @@ jobs:
           ls -l dist
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "BuildY VibeChat $GITHUB_REF_NAME" --notes-file notes.md \
             dist/vibechat-desktop-linux-x64.zip dist/vibechat-desktop-windows-x64.zip dist/vibechat-desktop-macos-arm64.zip \
-            dist/*.deb dist/vibechat-amd64-installer.exe "dist/BuildY VibeChat.dmg" dist/SHA256SUMS
+            dist/*.deb dist/vibechat-amd64-installer.exe dist/BuildY-VibeChat.dmg dist/SHA256SUMS
+      # What users download: every published asset against the published SHA256SUMS.
+      - name: Check the published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" -D published
+          cd published
+          sha256sum -c SHA256SUMS
+          [ "$(ls | grep -vc '^SHA256SUMS$')" = "$(wc -l < SHA256SUMS)" ] || { echo "release: assets and SHA256SUMS differ" >&2; ls -l; exit 1; }

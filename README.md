@@ -242,7 +242,7 @@ Without it (or without a working sandbox) the app runs but the agent stays off.
 |---|---|---|
 | Linux | `vibechat_<version>_amd64.deb` | `/usr/lib/vibechat/bridge` |
 | Windows | `vibechat-amd64-installer.exe` (NSIS) | `<install dir>\bridge` |
-| macOS | `BuildY VibeChat.dmg` (ad-hoc signed `.app`) | `Contents/Resources/bridge` |
+| macOS | `BuildY-VibeChat.dmg` (ad-hoc signed `.app`; volume «BuildY VibeChat») | `Contents/Resources/bridge` |
 
 It also writes the portable zip of that OS: `vibechat-desktop-linux-x64.zip`, `vibechat-desktop-windows-x64.zip`,
 `vibechat-desktop-macos-arm64.zip` (Apple Silicon only). CI uploads `vibechat-installer-<os>` (installer + zip) and

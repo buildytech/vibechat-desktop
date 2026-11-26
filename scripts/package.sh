@@ -2,7 +2,8 @@
 # Unsigned installers of BuildY VibeChat for the system this runs on (CI: one job per OS), into dist/:
 #   linux    vibechat_<version>_amd64.deb (wails3 tool package, nfpm): /usr/bin/vibechat + /usr/lib/vibechat/bridge
 #   windows  vibechat-amd64-installer.exe (NSIS, per-machine): vibechat.exe + bridge\
-#   darwin   BuildY VibeChat.app (ad-hoc signed only, bridge in Contents/Resources) inside "BuildY VibeChat.dmg"
+#   darwin   BuildY VibeChat.app (ad-hoc signed only, bridge in Contents/Resources) inside BuildY-VibeChat.dmg
+#            (no space in the file name: GitHub turns a space in an asset name into a dot, and SHA256SUMS must match)
 # and bin/: the bare executable with bin/bridge next to it (CI uploads bin/ as is).
 # The agent runtime (cursor-sdk-bridge + the SDK sandbox helper) is downloaded and verified by cmd/fetch-bridge
 # (bridge.lock.json): without it the app runs but the agent stays off (fail closed). No AppImage: it cannot carry
@@ -70,7 +71,7 @@ Darwin)
 	codesign --force --deep --sign - "$app"
 	codesign --verify --deep --strict "$app"
 	"$WAILS3" tool package -format dmg -name "BuildY VibeChat" -out bin -background build/darwin/dmg-background.png -volume-icon build/darwin/icons.icns -file-icon build/darwin/dmg-file-icon.icns
-	mv "bin/BuildY VibeChat.dmg" dist/
+	mv "bin/BuildY VibeChat.dmg" dist/BuildY-VibeChat.dmg
 	[ "$(uname -m)" = "arm64" ] || { echo "package: the macOS zip is the arm64 build; run on Apple Silicon" >&2; exit 1; }
 	ditto -c -k --sequesterRsrc --keepParent "$app" dist/vibechat-desktop-macos-arm64.zip
 	;;
