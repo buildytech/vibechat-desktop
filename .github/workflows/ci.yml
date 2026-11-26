@@ -228,10 +228,31 @@ jobs:
       - name: Server on Debian 13 (Incus VM, the desktop SSH connection e2e, then an Incus container inside it)
         run: bash scripts/ci-server-debian.sh dist/vibechat-server-linux-amd64.deb
 
+  # The setup wizard of a user's server end to end (scripts/ci-provision-e2e.sh): a fresh Debian 13 Incus VM with
+  # sshd and a root password like a VPS; the wizard runs twice (lockdown rollback without a confirmation, then the
+  # rerun skipping what is done), then limits, egress allowlist, keys-only sshd and the app's connection are checked.
+  provision-debian:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: vibechat-installer-ubuntu-24.04
+          path: dist
+      - name: Setup wizard on a Debian 13 VPS (Incus VM)
+        run: bash scripts/ci-provision-e2e.sh dist/vibechat-server-linux-amd64.deb
+
   # Tag v* → GitHub Release with stable asset names, so
   # https://github.com/buildytech/vibechat-desktop/releases/latest/download/<name> always points at the newest build.
   release:
-    needs: [build, server-debian]
+    needs: [build, server-debian, provision-debian]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
