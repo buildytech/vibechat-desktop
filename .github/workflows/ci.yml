@@ -19,7 +19,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       # The app version: scripts/package.sh and the desktop build stamp it (internal/appid.Version); a v* tag wins.
-      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.2' }}
+      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.3' }}
     defaults:
       run:
         shell: bash
@@ -130,7 +130,7 @@ jobs:
   server:
     runs-on: ubuntu-24.04
     env:
-      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.2' }}
+      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.3' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -270,6 +270,25 @@ jobs:
       - name: Release notes
         run: |
           cat > notes.md <<'EOF'
+          ## 0.2.3
+
+          **New: starter templates / Новое: стартовые шаблоны.** Three templates replace the old two: **Svelte**
+          (default) and **React**, the same mobile-first site (header, mobile Sheet menu, dark mode, hero, features,
+          call to action, footer) from UI8Kit primitives, content in JSON fixtures, no backend, the local Istok Web font,
+          a favicon set and the current ui8kit/contract rules for the agent; and **Empty**, a blank Vite page. Projects
+          made from the former templates (`vite-svelte-bun`, `vite-react-bun`) keep working. The server reads the list
+          from `templates.json`, so new templates need no server code.
+
+          **Новое: стартовые шаблоны.** Вместо двух старых шаблонов три: **Svelte** (по умолчанию) и **React** — один и
+          тот же сайт mobile-first (шапка, мобильное меню Sheet, тёмная тема, hero, преимущества, призыв к действию,
+          подвал) на примитивах UI8Kit, контент в JSON fixtures, без бэкенда, локальный шрифт Istok Web, набор favicon и
+          актуальные правила ui8kit/contract для агента; и **Пустой** — чистая страница на Vite. Проекты из прежних
+          шаблонов (`vite-svelte-bun`, `vite-react-bun`) продолжают работать. Сервер берёт список из `templates.json`,
+          новые шаблоны больше не требуют правок сервера.
+
+          Not verified yet: creating a project from each template in the installed app on Mac, Windows and Linux.
+          Не проверено: создание проекта из каждого шаблона в установленной программе на Mac, Windows и Linux.
+
           ## 0.2.2
 
           **Fixed: Studio dictionaries / Исправлено: словари Studio.** English dictionaries no longer contain bilingual
