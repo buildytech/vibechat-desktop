@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -64,6 +65,9 @@ func egressEnv(t *testing.T) (dir string, run func() (string, error)) {
 }
 
 func TestEgressScript(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the egress script runs on a Linux host; Git Bash cannot chmod")
+	}
 	dir, run := egressEnv(t)
 	dns := func(name, ips string) {
 		if err := os.WriteFile(filepath.Join(dir, "dns", name), []byte(ips), 0o644); err != nil {
