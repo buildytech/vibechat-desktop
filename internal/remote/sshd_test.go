@@ -22,6 +22,9 @@ type testSSHD struct {
 	allowed map[string]bool   // authorized public keys (Marshal) by string
 	permit  map[string]string // "127.0.0.1:18120" → local address
 	conns   []net.Conn
+	// password lets root in with it ("" = no password login); exec answers root's commands (the setup wizard).
+	password string
+	exec     func(cmd string, stdin []byte) (stdout, stderr string, code uint32)
 }
 
 func newHostKey(t *testing.T) ssh.Signer {
@@ -73,6 +76,15 @@ func (d *testSSHD) close() {
 
 func (d *testSSHD) serve() {
 	cfg := &ssh.ServerConfig{
+		PasswordCallback: func(c ssh.ConnMetadata, pw []byte) (*ssh.Permissions, error) {
+			d.mu.Lock()
+			ok := d.password != "" && c.User() == "root" && string(pw) == d.password
+			d.mu.Unlock()
+			if !ok {
+				return nil, io.ErrUnexpectedEOF
+			}
+			return &ssh.Permissions{}, nil
+		},
 		PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			d.mu.Lock()
 			ok := d.allowed[string(key.Marshal())]
@@ -111,6 +123,10 @@ func (d *testSSHD) handle(c net.Conn, cfg *ssh.ServerConfig) {
 		}
 	}()
 	for nc := range chans {
+		if nc.ChannelType() == "session" && sc.User() == "root" && d.exec != nil {
+			go d.session(nc)
+			continue
+		}
 		if nc.ChannelType() != "direct-tcpip" {
 			_ = nc.Reject(ssh.Prohibited, "port forwarding only")
 			continue
@@ -150,6 +166,32 @@ func (d *testSSHD) handle(c net.Conn, cfg *ssh.ServerConfig) {
 			go func() { _, _ = io.Copy(ch, up); done <- struct{}{} }()
 			<-done
 		}()
+	}
+}
+
+// session answers one exec request of root with d.exec.
+func (d *testSSHD) session(nc ssh.NewChannel) {
+	ch, reqs, err := nc.Accept()
+	if err != nil {
+		return
+	}
+	defer ch.Close()
+	for r := range reqs {
+		if r.Type != "exec" {
+			if r.WantReply {
+				_ = r.Reply(false, nil)
+			}
+			continue
+		}
+		var p struct{ Command string }
+		_ = ssh.Unmarshal(r.Payload, &p)
+		_ = r.Reply(true, nil)
+		stdin, _ := io.ReadAll(ch)
+		out, errOut, code := d.exec(p.Command, stdin)
+		_, _ = io.WriteString(ch, out)
+		_, _ = io.WriteString(ch.Stderr(), errOut)
+		_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{code}))
+		return
 	}
 }
 

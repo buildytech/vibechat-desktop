@@ -57,6 +57,8 @@ type Options struct {
 	// It is called on its own goroutine.
 	Navigate func(url string)
 	Log      func(string)
+	// Provision configures the setup wizard of a new server (provision.go).
+	Provision ProvisionOptions
 }
 
 // Problem is DesktopConnection.problem.
@@ -115,6 +117,11 @@ type Manager struct {
 	problem  *Problem
 	pub      string
 	closing  chan struct{} // closed when the last session's delayed close is done
+
+	prov        *Provision // the setup wizard's current or last run
+	provRunning bool
+	// provisionConfirm replaces the lockdown confirmation (tests: a missing confirmation).
+	provisionConfirm func(context.Context) error
 }
 
 // New loads the saved server.
@@ -424,6 +431,10 @@ func (m *Manager) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == m.DesktopPath() {
 			m.serveDesktop(w, r)
+			return
+		}
+		if r.URL.Path == m.ProvisionPath() {
+			m.serveProvision(w, r)
 			return
 		}
 		next.ServeHTTP(w, r)

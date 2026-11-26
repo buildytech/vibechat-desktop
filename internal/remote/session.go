@@ -51,6 +51,11 @@ type session struct {
 
 // dialSSH opens the SSH connection; seen gets the host key the server presented.
 func dialSSH(ctx context.Context, addr, user string, signer ssh.Signer, pin ssh.PublicKey, seen *ssh.PublicKey) (*ssh.Client, error) {
+	return dialSSHAuth(ctx, addr, user, []ssh.AuthMethod{ssh.PublicKeys(signer)}, pin, seen)
+}
+
+// dialSSHAuth is dialSSH with any auth methods (the setup wizard's root password).
+func dialSSHAuth(ctx context.Context, addr, user string, auth []ssh.AuthMethod, pin ssh.PublicKey, seen *ssh.PublicKey) (*ssh.Client, error) {
 	ctx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
 	var d net.Dialer
@@ -63,7 +68,7 @@ func dialSSH(ctx context.Context, addr, user string, signer ssh.Signer, pin ssh.
 	}
 	cc, chans, reqs, err := ssh.NewClientConn(conn, addr, &ssh.ClientConfig{
 		User:              user,
-		Auth:              []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		Auth:              auth,
 		HostKeyCallback:   pinCallback(pin, seen),
 		HostKeyAlgorithms: hostKeyAlgorithms(pin),
 		Timeout:           dialTimeout,

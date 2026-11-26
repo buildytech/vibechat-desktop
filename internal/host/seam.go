@@ -28,6 +28,11 @@ type Seam struct {
 	Desktop           []SeamRoute `json:"desktop"`
 	DesktopConnection []string    `json:"desktopConnection"`
 	TunnelUser        string      `json:"tunnelUser"`
+	// DesktopProvision / DesktopProvisionInput are the fields of the setup wizard's answer and input,
+	// ProvisionSteps its steps in order (internal/provision.Steps).
+	DesktopProvision      []string `json:"desktopProvision"`
+	DesktopProvisionInput []string `json:"desktopProvisionInput"`
+	ProvisionSteps        []string `json:"provisionSteps"`
 }
 
 // SeamAuth are the session constants of the remote host (HOST_SESSION_PATH and friends).
