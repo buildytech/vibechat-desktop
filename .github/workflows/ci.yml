@@ -19,7 +19,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       # The app version: scripts/package.sh and the desktop build stamp it (internal/appid.Version); a v* tag wins.
-      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.1' }}
+      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.2' }}
     defaults:
       run:
         shell: bash
@@ -130,7 +130,7 @@ jobs:
   server:
     runs-on: ubuntu-24.04
     env:
-      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.1' }}
+      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.2' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -270,6 +270,21 @@ jobs:
       - name: Release notes
         run: |
           cat > notes.md <<'EOF'
+          ## 0.2.2
+
+          **Fixed: Studio dictionaries / Исправлено: словари Studio.** English dictionaries no longer contain bilingual
+          "EN — RU" strings (the Editor button was "Download ZIP — Скачать ZIP"). EN files are English only, RU files
+          are Russian only. The UI language follows `navigator.language` (`ru` / `ru-*` → Russian, otherwise English).
+          There is no in-app language switch.
+
+          **Исправлено: словари Studio.** В английских словарях больше нет двуязычных строк «EN — RU» (кнопка в Editor
+          была «Download ZIP — Скачать ZIP»). Английский словарь — только английский, русский — только русский. Язык
+          интерфейса берётся из `navigator.language` (`ru` / `ru-*` — русский, иначе английский). Переключателя языка
+          в интерфейсе нет.
+
+          Not verified yet: the language of the installed app's WebView on a real Mac, Windows and Linux desktop
+          (it follows the WebView's `navigator.language`). Please report problems.
+
           ## 0.2.1
 
           **Fixed: the agent could not reach Cursor on a wizard-built server / Исправлено: агент не достучался до Cursor на
