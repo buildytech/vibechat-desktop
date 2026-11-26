@@ -147,7 +147,8 @@ The headless build has no auth: never expose it beyond loopback. It stays until 
 ## Server (preview) / Сервер (предварительно)
 
 `cmd/vibechat-server` is the same host on the user's own server: plain `net/http`, no Wails. The desktop app
-connects to it over SSH built into the app (Settings → Server); a setup wizard comes next.
+connects to it over SSH built into the app (Settings → Server); a fresh Debian 13 VPS is set up by the app's wizard
+(Settings → Set up a new server, below).
 
 **Required server OS: Debian 13 "trixie", x86_64** (one Incus container per user, the container also Debian 13).
 Ubuntu and other systems are not supported for now; `vibechat-server doctor` warns on them. CI installs the `.deb`
@@ -237,6 +238,63 @@ to the pinned baseline Bun); `scripts/bridge-qemu-smoke.sh <bridge dir>` runs it
 ready (CI does both). An early bridge exit is logged with its decoded exit code (e.g. `0xC000001D
 STATUS_ILLEGAL_INSTRUCTION`) and the last output lines.
 Without it (or without a working sandbox) the app runs but the agent stays off.
+
+### Setup wizard / Мастер настройки
+
+Settings → Set up a new server (in local mode; `internal/provision`, `internal/remote/provision.go`, the Studio's
+`GET/POST /runtime/v1/desktop/provision`, answered by the app itself). You type the VPS address and the root password
+once; the password lives only in memory for this run (zeroed afterwards), never in a file, the log or the webview.
+Over SSH (host key pinned on first use, strictly afterwards) the app runs ten steps; each one is check → apply →
+check, so a second run skips what is done (`/var/lib/vibechat-provision/state.json`):
+
+1. connect — root over SSH (password), pin the host key;
+2. preflight — Debian 13 x86_64, root, systemd, ≥ 2 GiB RAM, ≥ 18 GiB free on `/var/lib` (the container disk lives in an 18 GiB loop-file btrfs pool `vibechat`, where the 15 GiB root quota is enforced; the dir pool of `incus admin init --minimal` could not enforce it); anything else stops with "not supported";
+3. incus — `apt-get install incus`, `incus admin init --minimal` (no network listener: the app never gets the Incus API);
+4. container — bridge `vibechatbr0` (NAT, IPv4), profile `vibechat` (`limits.cpu=2`, `limits.memory=4GiB`, root disk
+   15GiB on the btrfs pool `vibechat`, `security.nesting=true`, proxy devices `127.0.0.1:18120/18121` on the host → the container),
+   unprivileged `images:debian/13` container `vibechat-owner`;
+5. server — the release `.deb` and `SHA256SUMS` downloaded on the host, `sha256sum -c --strict`, pushed and installed in
+   the container; Bun (pinned baseline build, sha256 from `bridge.lock.json`) for the user `vibechat`;
+6. egress — the allowlist (below);
+7. token — `vibechat-server token new` in the container; the token goes from stdout straight into the app's keychain
+   (`SERVER_HOST_TOKEN`), never printed or logged; a rerun checks the stored token with `Authorization: Bearer` sent on
+   stdin and makes a new one only if it no longer works;
+8. tunnel — host user `vibechat-tunnel` (no login shell) with only the app key:
+   `restrict,port-forwarding,permitopen="127.0.0.1:18120",permitopen="127.0.0.1:18121"`;
+9. verify — `vibechat-server doctor`, a new SSH connection as `vibechat-tunnel` with the app key and the pin, hello +
+   ticket; snapshot `provisioned`;
+10. lockdown — first `systemd-run --on-active=5min` arms a rollback (it removes the drop-in and reloads ssh), then
+    `/etc/ssh/sshd_config.d/00-vibechat.conf` (`PasswordAuthentication no`, `KbdInteractiveAuthentication no`,
+    `PermitRootLogin prohibit-password`), `sshd -t`, `sshd -T` check, reload. The app then signs in with its key and
+    checks that the root password is refused; only then is the rollback timer stopped. Without that confirmation the
+    password login comes back by itself after 5 minutes. An optional root public key from the form goes into
+    `/root/.ssh/authorized_keys` before the lockdown (otherwise: the provider's web console).
+
+After step 10 the app connects to the server (remote mode). A run after the lockdown can no longer sign in with the
+password (`auth`): by design.
+
+**Egress allowlist.** An Incus network ACL `vibechat-egress` on `vibechatbr0`: egress default reject, only TCP 443 to
+the IPv4 addresses (/32) of these names, plus DNS to the bridge's dnsmasq:
+`api2.cursor.sh`, `api3.cursor.sh`, `api4.cursor.sh`, `api5.cursor.sh`, `repo42.cursor.sh`, `agent.api5.cursor.sh`,
+`agentn.api5.cursor.sh`, `agentn.us.api5.cursor.sh`, `agentn.global.api5.cursor.sh`, `authenticate.cursor.sh`,
+`authentication.cursor.sh`, `prod.authentication.cursor.sh` (Cursor's list, cursor.com/docs/enterprise/network-configuration),
+`registry.npmjs.org`, `bun.sh`, and GitHub for Bun / server updates (`github.com`, `api.github.com`,
+`codeload.github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`). The host resolves the
+names (`/usr/local/sbin/vibechat-egress`, `vibechat-egress.timer` every 10 min), keeps the union with the previous run
+(CDN rotation; an empty resolution keeps the old ACL) and pins the answers in the container's `/etc/hosts`.
+DNS caveats: the rule is by IP, so another site on the same CDN address is reachable too; a name whose addresses change
+between refreshes fails until the next one; wildcard subdomains are not covered; DNS queries themselves go out through
+the host's dnsmasq (a possible channel for small leaks); IPv6 is off on the bridge. The ACL is applied after the
+server step: `apt` in the container needs `deb.debian.org`, which is blocked afterwards (server updates come from
+GitHub releases).
+
+Tests: `internal/provision` (every script through `bash -n`, a fake host: each step, idempotency, continuing after a
+failure, refusal of other systems, the token only to the keychain, lockdown waits for the confirmation, the egress
+script with stub `incus`/`getent`) and the e2e `scripts/ci-provision-e2e.sh` (CI job `provision-debian`): a Debian 13
+Incus VM with sshd and a random root password, the wizard via `go test -tags e2e -run TestProvisionE2E
+./internal/remote`: run 1 without the confirmation → `not_confirmed`, password refused, back after the rollback; run 2
+skips done steps, locks down, connects and signs in; run 3 → `auth`; then limits, unprivileged id map, ACL (allowed:
+npm, Cursor, Bun, GitHub; blocked: example.com, 1.1.1.1, deb.debian.org, plain http), `sshd -T`, the tunnel user.
 
 ## Installers
 
