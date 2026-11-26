@@ -338,31 +338,45 @@ jobs:
           `~/Library/Application Support/tw.buildy.vibechat/logs/vibechat.log`, Linux `~/.config/tw.buildy.vibechat/logs/vibechat.log`.
           EOF
       # SHA256SUMS of every asset: vibechat-server update checks the server .deb against it before dpkg -i.
+      # One list (assets.txt) is both what SHA256SUMS covers and what gets uploaded: the names must match exactly.
       - name: SHA256SUMS
         run: |
+          set -euo pipefail
           cd dist
           # Asset names must survive upload unchanged (GitHub turns a space into a dot), or sha256sum -c fails.
-          assets="vibechat-desktop-linux-x64.zip vibechat-desktop-windows-x64.zip vibechat-desktop-macos-arm64.zip $(ls *.deb) vibechat-amd64-installer.exe BuildY-VibeChat.dmg"
-          for f in $assets; do case "$f" in *[!A-Za-z0-9._-]*) echo "release: asset name GitHub would change: $f" >&2; exit 1 ;; esac; done
-          sha256sum -- $assets > SHA256SUMS
+          printf '%s\n' vibechat-desktop-linux-x64.zip vibechat-desktop-windows-x64.zip vibechat-desktop-macos-arm64.zip \
+            *.deb vibechat-amd64-installer.exe BuildY-VibeChat.dmg | sort -u > ../assets.txt
+          while read -r f; do
+            case "$f" in *[!A-Za-z0-9._-]*) echo "release: asset name GitHub would change: $f" >&2; exit 1 ;; esac
+            [ -f "$f" ] || { echo "release: missing asset $f" >&2; exit 1; }
+          done < ../assets.txt
+          xargs -a ../assets.txt sha256sum -- > SHA256SUMS
           cat SHA256SUMS
-          sha256sum -c SHA256SUMS
+          # Every name in SHA256SUMS is an asset and every asset is in SHA256SUMS.
+          diff <(awk '{print $2}' SHA256SUMS | sort) ../assets.txt || { echo "release: SHA256SUMS names differ from the assets" >&2; exit 1; }
+          sha256sum -c --strict SHA256SUMS
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          set -euo pipefail
           ls -l dist
+          mapfile -t files < <(sed 's|^|dist/|' assets.txt)
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "BuildY VibeChat $GITHUB_REF_NAME" --notes-file notes.md \
-            dist/vibechat-desktop-linux-x64.zip dist/vibechat-desktop-windows-x64.zip dist/vibechat-desktop-macos-arm64.zip \
-            dist/*.deb dist/vibechat-amd64-installer.exe dist/BuildY-VibeChat.dmg dist/SHA256SUMS
-      # What users download: every published asset against the published SHA256SUMS.
+            "${files[@]}" dist/SHA256SUMS
+      # What users download: the release's asset names against SHA256SUMS (both ways), then sha256sum -c on the
+      # downloaded files.
       - name: Check the published assets
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          set -euo pipefail
+          gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name' | grep -vx SHA256SUMS | sort > published.txt
+          diff published.txt assets.txt || { echo "release: published assets differ from the built ones" >&2; exit 1; }
           gh release download "$GITHUB_REF_NAME" -D published
           cd published
-          sha256sum -c SHA256SUMS
-          [ "$(ls | grep -vc '^SHA256SUMS$')" = "$(wc -l < SHA256SUMS)" ] || { echo "release: assets and SHA256SUMS differ" >&2; ls -l; exit 1; }
+          diff <(awk '{print $2}' SHA256SUMS | sort) ../published.txt || { echo "release: SHA256SUMS names differ from the published assets" >&2; exit 1; }
+          diff <(ls | grep -vx SHA256SUMS | sort) ../published.txt || { echo "release: downloaded files differ" >&2; exit 1; }
+          sha256sum -c --strict SHA256SUMS
