@@ -9,7 +9,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 WAILS3="${WAILS3:-wails3}"
-VERSION="${VIBECHAT_VERSION:-0.1.5}"
+VERSION="${VIBECHAT_VERSION:-0.1.7}"
 export VIBECHAT_VERSION="${VERSION#v}" GOARCH="${GOARCH:-amd64}"
 [ "$(uname -s)" = Linux ] || { echo "package-server: Linux only" >&2; exit 1; }
 [ -f frontend/dist/index.html ] || { echo "package-server: frontend/dist missing (scripts/build-frontend.sh)" >&2; exit 1; }

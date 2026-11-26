@@ -17,7 +17,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       # The app version: scripts/package.sh and the desktop build stamp it (internal/appid.Version); a v* tag wins.
-      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.1.6' }}
+      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.1.7' }}
     defaults:
       run:
         shell: bash
@@ -266,22 +266,48 @@ jobs:
       - name: Release notes
         run: |
           cat > notes.md <<'EOF'
-          ## New: server mode over SSH / Новое: режим сервера по SSH
+          ## 0.1.7
 
-          The desktop app can run the agent on your own server: Settings → Server. SSH is built into the app (no `ssh`
-          binary): the app's ed25519 key and the host token stay in the OS keychain, the server's host key is pinned on
-          the first connect and checked strictly afterwards, the window shows the server's Studio through a local tunnel
-          (`http://127.0.0.1:<port>`), previews are forwarded too. Settings shows the server version and warns when it is
-          older than the app; a protocol mismatch shows an update screen. In server mode the Cursor key is stored on the
-          server, not on the PC. Settings → Server shows the root commands for the tunnel user (port forwarding only, no
-          shell).
+          **New: server setup wizard / Новое: мастер настройки сервера.** Settings → Set up a new server: enter a fresh
+          Debian 13 VPS's address and the root password once (kept in memory for this run only, never stored). Over SSH
+          the app runs ten idempotent steps: checks the system (Debian 13 x86_64 only, otherwise it stops), installs
+          Incus (no network API: the app never gets Incus access), creates an unprivileged Debian 13 container
+          (`security.nesting`, 2 CPU / 4 GiB / 15 GiB, the disk quota enforced on a btrfs pool), installs
+          vibechat-server (`.deb` checked against `SHA256SUMS`) and Bun, limits the container's internet to Cursor, npm,
+          Bun and GitHub (an Incus network ACL by IP, refreshed every 10 minutes), puts a new host token straight into the
+          app's keychain, adds a `vibechat-tunnel` user that may only forward the two ports, pins the host key, checks the
+          connection, and finally turns off SSH password login (root included). A `systemd-run` timer turns password login
+          back on after 5 minutes unless the app confirms that its own key login works. An optional root public key can be
+          added in the form. Then the app connects to the server.
 
-          Приложение может запускать агента на вашем сервере: Настройки → Сервер. SSH встроен, ключи — в системной
-          связке ключей, ключ хоста закрепляется при первом подключении, ключ Cursor хранится на сервере.
+          Настройки → «Настроить новый сервер»: адрес и пароль root вводятся один раз (пароль не сохраняется); мастер ставит
+          Incus и изолированный контейнер с vibechat-server (2 CPU, 4 ГБ, 15 ГБ; интернет только Cursor, npm, Bun и GitHub)
+          и отключает вход по паролю с откатом через 5 минут, если приложение не подтвердит вход своим ключом.
 
-          Known limitation: on macOS the system resolver does not resolve `*.localhost`, so the app gives every preview
-          its own `http://127.0.0.1:<port>` there. This per-port scheme passes its tests but **has not been verified on
-          a real Mac yet**; please report preview problems on macOS (`VIBECHAT_PREVIEW_PORTS=0` turns it off).
+          **Settings → Server help / Справка по серверу:** signing in as root with your own SSH key once password login is
+          off, and backups of `/var/lib/vibechat` to S3 with restic.
+
+          **Fixed: `SHA256SUMS`.** In v0.1.6 the macOS installer was listed as `BuildY VibeChat.dmg` while the asset is
+          `BuildY.VibeChat.dmg`, so `sha256sum -c` failed for it. The asset is now `BuildY-VibeChat.dmg`, and the release
+          checks that the names in `SHA256SUMS` and the assets match both ways and that `sha256sum -c` passes before and
+          after publishing.
+
+          **Not verified on a real VPS yet** (the wizard is tested end to end in CI on a Debian 13 Incus VM only):
+          provider images and cloud-init setups; hosts where ssh is socket-activated; IPv6-only hosts (IPv6 is off on
+          the container network); CDN addresses drifting over days (the allowlist is by IP, so another site on the same CDN
+          address is reachable too); real Cursor agent traffic through the allowlist (only `api2.cursor.sh` was checked;
+          wildcard subdomains are not covered); DNS through the host's resolver as a possible small leak channel; `apt` in
+          the container is blocked after setup (server updates come from GitHub releases); the wizard with the macOS and
+          Windows keychains and the card in the installed app. A second run after the lockdown cannot sign in with the
+          password (by design): use your own root key or the provider's web console. Please report problems.
+
+          Also still not verified on a real Mac: the per-port previews on macOS (`VIBECHAT_PREVIEW_PORTS=0` turns them off).
+
+          ## Server mode over SSH / Режим сервера по SSH
+
+          Settings → Server connects the app to a vibechat-server over SSH built into the app (no `ssh` binary): the app's
+          ed25519 key and the host token stay in the OS keychain, the host key is pinned on the first connect, previews are
+          forwarded, the Cursor key is stored on the server.
 
           `SHA256SUMS` lists the SHA-256 of every asset (the server's self-update checks the `.deb` against it).
 
@@ -328,8 +354,8 @@ jobs:
           Open only trusted projects on Windows. macOS (Seatbelt) and Linux (Landlock + bubblewrap) run the agent in the
           SDK sandbox: writes only in the project, no network, fail closed.
 
-          On Windows prefer server mode (above): the agent then runs in the SDK sandbox on your Debian 13 server. A setup
-          wizard for the server (Incus container per user) comes next.
+          On Windows prefer server mode (above): the agent then runs in the SDK sandbox on your Debian 13 server, set up by
+          the wizard (Settings → Set up a new server).
 
           В Windows локальный агент работает без песочницы: открывайте только доверенные проекты или используйте режим
           сервера (агент в песочнице на вашем сервере Debian 13).
