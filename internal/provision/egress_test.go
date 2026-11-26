@@ -65,8 +65,8 @@ func egressEnv(t *testing.T) (dir string, run func() (string, error)) {
 }
 
 func TestEgressScript(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the egress script runs on a Linux host; Git Bash cannot chmod")
+	if runtime.GOOS != "linux" {
+		t.Skip("the egress script runs on a Linux host (flock, install -m, GNU tools)")
 	}
 	dir, run := egressEnv(t)
 	dns := func(name, ips string) {
