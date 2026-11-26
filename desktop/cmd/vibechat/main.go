@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -51,14 +52,15 @@ func main() {
 		log.Printf("vibechat %s: log %s", appid.Version, f)
 	}
 	var mainWindow *application.WebviewWindow
+	var app *application.App
 	conn := newRemote(seam, data, func(u string) {
 		if mainWindow != nil {
 			mainWindow.SetURL(u)
 		}
-	})
+	}, func(name string) (string, error) { return saveAs(app, mainWindow, name) })
 	defer conn.Close()
 
-	app := application.New(application.Options{
+	app = application.New(application.Options{
 		Name:        appid.Name,
 		Description: "BuildY VibeChat desktop (a window to your vibechat-server)",
 		Mac:         application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
@@ -88,6 +90,22 @@ func main() {
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// saveAs is the system's Save dialog over the main window, in the Downloads folder, for the project's ZIP
+// (POST /desktop/archive): the chosen path, or "" when the user closed it.
+func saveAs(app *application.App, w *application.WebviewWindow, name string) (string, error) {
+	if app == nil {
+		return "", errors.New("the app is not running yet")
+	}
+	d := app.Dialog.SaveFile().SetFilename(name).CanCreateDirectories(true).AddFilter("ZIP", "*.zip")
+	if dir := application.Path(application.PathDownload); dir != "" {
+		d.SetDirectory(dir)
+	}
+	if w != nil {
+		d.AttachToWindow(w)
+	}
+	return d.PromptForSingleSelection()
 }
 
 // webviewDataDir is <UserConfigDir>/tw.buildy.vibechat/WebView2 (used on Windows only).

@@ -44,12 +44,12 @@ func seamNotFound(prefix string, next http.Handler) http.Handler {
 // newRemote is the connection to the owner's vibechat-server (SSH key and host token in the OS keychain, the saved
 // server in <data>/remote.json). The app speaks the pinned seam's protocol and accepts servers down to its
 // minClientProtocol (one compatibility window for both sides).
-func newRemote(seam protocol.Seam, data string, navigate func(string)) *remote.Manager {
+func newRemote(seam protocol.Seam, data string, navigate func(string), saveAs func(string) (string, error)) *remote.Manager {
 	m, err := remote.New(remote.Options{
 		DataDir: data, Creds: remote.Keyring{}, AppVersion: appid.Version,
 		AppProtocol: seam.Protocol, MinServerProtocol: seam.MinClientProtocol,
 		Prefix: seam.Prefix, SessionPath: seam.Auth.SessionPath, TicketParam: seam.Auth.TicketParam,
-		Navigate: navigate, Log: func(s string) { log.Print(s) }, PreviewPortPerProject: previewPortPerProject(),
+		Navigate: navigate, SaveAs: saveAs, Log: func(s string) { log.Print(s) }, PreviewPortPerProject: previewPortPerProject(),
 	})
 	if err != nil {
 		log.Fatal(err)

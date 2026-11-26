@@ -37,6 +37,10 @@ type Seam struct {
 	DesktopProvision      []string `json:"desktopProvision"`
 	DesktopProvisionInput []string `json:"desktopProvisionInput"`
 	ProvisionSteps        []string `json:"provisionSteps"`
+	// DesktopArchive / DesktopArchiveInput are the fields of POST /desktop/archive's answer and input (the project's ZIP
+	// saved by the app, desktop/internal/remote/archive.go).
+	DesktopArchive      []string `json:"desktopArchive"`
+	DesktopArchiveInput []string `json:"desktopArchiveInput"`
 }
 
 // SeamAuth are the session constants of the remote host (HOST_SESSION_PATH and friends).

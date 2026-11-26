@@ -10,7 +10,7 @@ import (
 // settings.
 func TestDesktopRoutesAreNotTheServers(t *testing.T) {
 	s := pinnedSeam(t)
-	if len(s.Desktop) != 5 {
+	if len(s.Desktop) != 6 {
 		t.Fatalf("desktop routes %v", s.Desktop)
 	}
 	h := testHost(t, s)

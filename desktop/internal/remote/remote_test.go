@@ -45,6 +45,15 @@ func fakeServer(t *testing.T, minClient, previewPort int, legacy303 bool) *httpt
 	mux.HandleFunc("GET /runtime/v1/projects", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, []map[string]any{{"id": "abc123", "preview_url": "http://abc123.preview.localhost:" + strconv.Itoa(previewPort) + "/"}})
 	})
+	mux.HandleFunc("GET /runtime/v1/projects/{id}/archive.zip", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("id") != "abc123" {
+			writeJSON(w, 404, map[string]string{"error": "Project not found"})
+			return
+		}
+		w.Header().Set("content-type", "application/zip")
+		w.Header().Set("content-disposition", `attachment; filename="moy-lending.zip"`)
+		_, _ = io.WriteString(w, testZip)
+	})
 	mux.HandleFunc("GET /runtime/v1/host/capabilities", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{"seam": "1"})
 	})

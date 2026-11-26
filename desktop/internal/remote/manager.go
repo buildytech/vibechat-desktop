@@ -59,6 +59,9 @@ type Options struct {
 	Log      func(string)
 	// Provision configures the setup wizard of a new server (provision.go).
 	Provision ProvisionOptions
+	// SaveAs asks where to save a file named name (the system's Save dialog; archive.go): the chosen path, or "" when
+	// the user closed the dialog. nil: the app cannot save files (POST /desktop/archive answers 501).
+	SaveAs func(name string) (string, error)
 }
 
 // Problem is DesktopConnection.problem.
@@ -468,10 +471,10 @@ func (m *Manager) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// serveLocal is the proxy's local part: the connection routes for a window signed in to the server (its session
+// serveLocal is the proxy's local part: the connection and archive routes for a window signed in to the server (its session
 // cookie, checked by the server), from the proxy's own origin.
 func (m *Manager) serveLocal(w http.ResponseWriter, r *http.Request) bool {
-	if r.URL.Path != m.DesktopPath() {
+	if r.URL.Path != m.DesktopPath() && r.URL.Path != m.ArchivePath() {
 		return false
 	}
 	m.mu.Lock()
@@ -483,6 +486,10 @@ func (m *Manager) serveLocal(w http.ResponseWriter, r *http.Request) bool {
 	}
 	if s == nil || !m.signedIn(r, s) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "sign in again from the VibeChat app"})
+		return true
+	}
+	if r.URL.Path == m.ArchivePath() {
+		m.serveArchive(w, r, s)
 		return true
 	}
 	m.serveDesktop(w, r)

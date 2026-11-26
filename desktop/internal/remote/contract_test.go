@@ -28,7 +28,7 @@ func TestDesktopRoutesMatchTheContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.Desktop) != 5 || s.TunnelUser != "vibechat-tunnel" {
+	if len(s.Desktop) != 6 || s.TunnelUser != "vibechat-tunnel" {
 		t.Fatalf("desktop %v, tunnel user %q", s.Desktop, s.TunnelUser)
 	}
 	m, err := remote.New(remote.Options{DataDir: t.TempDir(), Creds: &remote.MemCreds{}, Prefix: s.Prefix})
@@ -37,13 +37,13 @@ func TestDesktopRoutesMatchTheContract(t *testing.T) {
 	}
 	var keys []string
 	for _, r := range s.Desktop {
-		if p := s.Prefix + r.Path; p != m.DesktopPath() && p != m.ProvisionPath() {
-			t.Errorf("%s: remote answers %s and %s", r.Key(), m.DesktopPath(), m.ProvisionPath())
+		if p := s.Prefix + r.Path; p != m.DesktopPath() && p != m.ProvisionPath() && p != m.ArchivePath() {
+			t.Errorf("%s: remote answers %s, %s and %s", r.Key(), m.DesktopPath(), m.ProvisionPath(), m.ArchivePath())
 		}
 		keys = append(keys, r.Key())
 	}
 	slices.Sort(keys)
-	want := []string{"DELETE /desktop/connection", "GET /desktop/connection", "GET /desktop/provision", "POST /desktop/provision", "PUT /desktop/connection"}
+	want := []string{"DELETE /desktop/connection", "GET /desktop/connection", "GET /desktop/provision", "POST /desktop/archive", "POST /desktop/provision", "PUT /desktop/connection"}
 	if !reflect.DeepEqual(keys, want) {
 		t.Errorf("routes %v", keys)
 	}
@@ -55,6 +55,9 @@ func TestDesktopRoutesMatchTheContract(t *testing.T) {
 	}
 	if !reflect.DeepEqual(provision.Steps, s.ProvisionSteps) {
 		t.Errorf("provision.Steps %v, contract %v", provision.Steps, s.ProvisionSteps)
+	}
+	if !reflect.DeepEqual(jsonFields(remote.Archive{}), s.DesktopArchive) || !reflect.DeepEqual(jsonFields(remote.ArchiveInput{}), s.DesktopArchiveInput) {
+		t.Errorf("remote.Archive %v / ArchiveInput %v, contract %v / %v", jsonFields(remote.Archive{}), jsonFields(remote.ArchiveInput{}), s.DesktopArchive, s.DesktopArchiveInput)
 	}
 	if fields := jsonFields(remote.Connection{}); !reflect.DeepEqual(fields, s.DesktopConnection) {
 		t.Errorf("remote.Connection fields %v, contract %v", fields, s.DesktopConnection)

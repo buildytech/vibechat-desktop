@@ -24,6 +24,7 @@ func (h *Host) registerFiles() {
 	h.router.Handle("PUT /projects/:id/file", h.writeFile)
 	h.router.Handle("GET /projects/:id/brief", h.getBrief)
 	h.router.Handle("PUT /projects/:id/brief", h.putBrief)
+	h.router.Handle("GET /projects/:id/archive.zip", h.archive)
 }
 
 type treeNode struct {

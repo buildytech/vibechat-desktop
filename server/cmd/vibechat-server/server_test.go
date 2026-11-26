@@ -142,6 +142,18 @@ func TestFrontDoor(t *testing.T) {
 	if res, _ := call(t, "POST", srv.URL+"/runtime/v1/auth/ticket", sess); res.StatusCode != 401 {
 		t.Fatalf("the window session minted a ticket: %d", res.StatusCode)
 	}
+	// The project's ZIP sits behind the same door: no cookie 401, a foreign Host 421, the window's cookie reaches the
+	// seam (this host has no projects: 501 { error } from the router, never the Studio page).
+	archive := srv.URL + "/runtime/v1/projects/abc/archive.zip"
+	if res, _ := call(t, "GET", archive, nil); res.StatusCode != 401 {
+		t.Errorf("archive without the cookie: %d", res.StatusCode)
+	}
+	if res, _ := call(t, "GET", archive, map[string]string{"Cookie": cookie, "Host": "attacker.example:18120"}); res.StatusCode != http.StatusMisdirectedRequest {
+		t.Errorf("archive with a foreign Host: %d", res.StatusCode)
+	}
+	if res, body := call(t, "GET", archive, sess); res.StatusCode == 401 || res.StatusCode == 421 || !strings.Contains(body, `"error"`) || body == "studio" {
+		t.Errorf("archive with the cookie: %d %s", res.StatusCode, body)
+	}
 	if res, _ := call(t, "GET", srv.URL+"/auth/session?ticket="+tk.Ticket, nil); res.StatusCode != 401 {
 		t.Fatalf("ticket reused: %d", res.StatusCode)
 	}
