@@ -212,6 +212,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # The desktop's Go packages embed the pinned seam contract (third_party/studio); templates are not needed.
+      - name: Studio submodule (the seam contract)
+        run: git submodule update --init --depth 1 third_party/studio
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -233,6 +236,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # The desktop's Go packages embed the pinned seam contract (third_party/studio); templates are not needed.
+      - name: Studio submodule (the seam contract)
+        run: git submodule update --init --depth 1 third_party/studio
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
