@@ -340,6 +340,9 @@ etc="${VIBECHAT_EGRESS_ETC:-/etc/vibechat}"
 state="${VIBECHAT_EGRESS_STATE:-/var/lib/vibechat-provision}"
 . "$etc/egress.conf"
 install -d -m 700 "$state"
+# One run at a time: the timer fires as soon as the wizard enables it, while the wizard runs this too.
+exec 9> "$state/egress.lock"
+flock 9
 cur="$(mktemp)" hosts="$(mktemp)"
 trap 'rm -f "$cur" "$hosts" "$hosts.new"' EXIT
 while read -r d; do
@@ -357,7 +360,7 @@ touch "$state/egress.prev"
 all="$(sort -u "$cur" "$state/egress.prev" | grep -E '^[0-9]+(\.[0-9]+){3}$' | sed 's|$|/32|' | paste -sd, -)"
 sort -u "$cur" > "$state/egress.prev"
 gw="$(incus network get "$NETWORK" ipv4.address | cut -d/ -f1)"
-incus network acl show "$ACL" >/dev/null 2>&1 || incus network acl create "$ACL"
+incus network acl show "$ACL" >/dev/null 2>&1 || incus network acl create "$ACL" 2>/dev/null || incus network acl show "$ACL" >/dev/null
 incus network acl edit "$ACL" <<EOF
 name: $ACL
 description: VibeChat container egress allowlist (vibechat-egress)
