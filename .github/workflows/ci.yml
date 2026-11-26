@@ -72,6 +72,25 @@ jobs:
         run: go build -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat-server-check ./cmd/vibechat-server
       - name: Desktop build
         run: go build -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat ./cmd/vibechat
+      # Can this platform's webview frame the server's preview gateway at http://<id>.preview.localhost:<port>
+      # (WebView2 / WKWebView / WebKitGTK)? Real window, fake gateway; prints one JSON line. Reported, not gating.
+      - name: Webview *.localhost probe
+        timeout-minutes: 3
+        run: |
+          set +e
+          case "$RUNNER_OS" in
+            Linux)
+              sudo apt-get install -y xvfb >/dev/null
+              GTK_A11Y=none xvfb-run -a bin/vibechat --probe-localhost; code=$?
+              if [ "$code" != 0 ]; then
+                echo "retry with the WebKit sandbox off (Ubuntu runner: AppArmor restricts user namespaces)"
+                GTK_A11Y=none WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 xvfb-run -a bin/vibechat --probe-localhost; code=$?
+              fi ;;
+            Windows) bin/vibechat.exe --probe-localhost; code=$? ;;
+            macOS)   bin/vibechat --probe-localhost; code=$? ;;
+          esac
+          [ "$code" = 0 ] || echo "::warning::webview *.localhost probe failed on $RUNNER_OS (exit $code)"
+          exit 0
       - name: Packaging tools (wails3 CLI of the pinned Wails; NSIS on Windows)
         run: |
           go install "github.com/wailsapp/wails/v3/cmd/wails3@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)"
