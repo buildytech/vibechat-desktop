@@ -172,9 +172,9 @@ jobs:
           VIBECHAT_E2E_INSTALL=1 VIBECHAT_E2E_DIR="$d" go test -count=1 -v -run TestTemplatesInstallE2E ./server
       - name: Server build (server/cmd/vibechat-server, net/http)
         run: go build -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat-server-check ./server/cmd/vibechat-server
-      - name: Packaging tools (the wails3 CLI, its nfpm packs the .deb)
+      - name: Packaging tools (the wails3 CLI without cgo, no GTK here; its nfpm packs the .deb)
         run: |
-          go install "github.com/wailsapp/wails/v3/cmd/wails3@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)"
+          CGO_ENABLED=0 go install "github.com/wailsapp/wails/v3/cmd/wails3@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)"
           sudo apt-get update && sudo apt-get install -y dpkg-dev file >/dev/null
       - name: Agent runtime (server/cmd/fetch-bridge, server/bridge.lock.json)
         run: go run ./server/cmd/fetch-bridge -out bin/bridge -cache "${BRIDGE_CACHE:-.bridge-cache}"
