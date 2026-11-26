@@ -27,8 +27,9 @@ One repository, one Go module, three parts:
 Two public git submodules, pinned by commit: `third_party/studio` =
 [buildytech/studio](https://github.com/buildytech/studio) (the Studio, the start screen, Agent Contract v1 and the
 host seam, [ADR 0002](https://github.com/buildytech/studio/blob/main/docs/adr/0002-host-seam-contract.md)) and
-`server/third_party/templates` = [buildytech/templates](https://github.com/buildytech/templates) (`vite-svelte-bun`,
-`vite-react-bun`). Nothing in a submodule is edited here; a change reaches this repository by moving the pin.
+`server/third_party/templates` = [buildytech/templates](https://github.com/buildytech/templates) (`templates.json`:
+`svelte`, `react`, `empty`; the server builds its template list from the manifest, so a template with a known runner
+needs only a pin bump). Nothing in a submodule is edited here; a change reaches this repository by moving the pin.
 
 ## Скачать / Download
 

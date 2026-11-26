@@ -23,6 +23,8 @@ type Profile struct {
 	Stack       string `json:"stack"`
 	Description string `json:"description"`
 	Enabled     bool   `json:"enabled"`
+	// Aliases are former ids of this template (projects made from them keep their profile).
+	Aliases []string `json:"-"`
 	// Files is the template source (fs root = template root).
 	Files fs.FS `json:"-"`
 	// Install, Dev and Build are argv; "{port}" in Dev is the dev-server port, "{hmrPort}" the preview proxy port.
@@ -30,6 +32,19 @@ type Profile struct {
 	Dev     []string          `json:"-"`
 	DevEnv  map[string]string `json:"-"`
 	Build   []string          `json:"-"`
+}
+
+// Is reports whether id is this template's id or one of its aliases.
+func (p Profile) Is(id string) bool {
+	if p.ID == id {
+		return true
+	}
+	for _, a := range p.Aliases {
+		if a == id {
+			return true
+		}
+	}
+	return false
 }
 
 // Expand replaces {port} and {hmrPort}.

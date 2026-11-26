@@ -31,7 +31,7 @@ func (h *Host) registerProjects() {
 
 func (h *Host) template(id string) (templates.Profile, bool) {
 	for _, t := range h.opts.Templates {
-		if t.ID == id {
+		if t.Is(id) {
 			return t, true
 		}
 	}
@@ -61,7 +61,11 @@ func (h *Host) projectJSON(p store.Project) map[string]any {
 			url = st.URL
 		}
 	}
-	return map[string]any{"id": p.ID, "name": p.Name, "status": status, "preview_url": url, "template_id": p.TemplateID, "created_at": p.CreatedAt, "updated_at": p.UpdatedAt}
+	tid := p.TemplateID
+	if t, ok := h.template(tid); ok {
+		tid = t.ID // a former id (alias) reads as the template's current id
+	}
+	return map[string]any{"id": p.ID, "name": p.Name, "status": status, "preview_url": url, "template_id": tid, "created_at": p.CreatedAt, "updated_at": p.UpdatedAt}
 }
 
 func (h *Host) listProjects(w http.ResponseWriter, _ *http.Request, _ Params) {

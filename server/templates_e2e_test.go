@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +36,11 @@ func TestTemplatesInstallE2E(t *testing.T) {
 			if err := host.InstallDeps(ctx, dir, tpl, func(l string) { t.Log(l) }); err != nil {
 				t.Fatal(err)
 			}
-			for _, f := range []string{"node_modules/vite/package.json", "node_modules/tailwindcss/package.json"} {
+			want := []string{"node_modules/vite/package.json"}
+			if pkg, _ := os.ReadFile(filepath.Join(dir, "package.json")); strings.Contains(string(pkg), `"tailwindcss"`) {
+				want = append(want, "node_modules/tailwindcss/package.json")
+			}
+			for _, f := range want {
 				if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(f))); err != nil {
 					t.Errorf("%s missing after install", f)
 				}

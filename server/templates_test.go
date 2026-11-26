@@ -2,36 +2,86 @@ package server
 
 import (
 	"io/fs"
+	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestTemplatesEmbedded(t *testing.T) {
 	ts := Templates()
-	if len(ts) == 0 || ts[0].ID != "vite-svelte-bun" {
-		t.Fatalf("the Svelte landing must be the first (default) template: %+v", ts)
+	if len(ts) < 3 || ts[0].ID != "svelte" {
+		t.Fatalf("the Svelte starter must be the first (default) template: %+v", ts)
 	}
+	ids := map[string]bool{}
 	for _, p := range ts {
-		for _, f := range []string{"package.json", "bun.lock", "AGENTS.md", "vite.config.ts"} {
+		ids[p.ID] = true
+		for _, f := range []string{"package.json", "bun.lock", "AGENTS.md", "vite.config.ts", "index.html", "LICENSE"} {
 			if _, err := fs.Stat(p.Files, f); err != nil {
 				t.Errorf("%s: %s missing", p.ID, f)
 			}
 		}
-		if len(p.Install) == 0 || len(p.Dev) == 0 || len(p.Build) == 0 {
+		if !p.Enabled || len(p.Install) == 0 || len(p.Dev) == 0 || len(p.Build) == 0 {
 			t.Errorf("%s: incomplete profile", p.ID)
 		}
-		if _, err := fs.Stat(p.Files, "node_modules"); err == nil {
-			t.Errorf("%s: node_modules embedded", p.ID)
+		for _, f := range []string{"node_modules", "dist"} {
+			if _, err := fs.Stat(p.Files, f); err == nil {
+				t.Errorf("%s: %s embedded", p.ID, f)
+			}
+		}
+		for _, f := range []string{".cursor/hooks.json", ".cursor/sandbox.json", ".cursor/mcp.json"} {
+			if _, err := fs.Stat(p.Files, f); err == nil {
+				t.Errorf("%s ships agent config %s", p.ID, f)
+			}
 		}
 	}
-	svelte := ts[0].Files
-	for _, f := range []string{"src/content/page.json", "contracts/blocks.json", ".cursor/rules/00-ui8kit-core.mdc", ".ui8px/gate.json", "ui8kit.lock.json"} {
-		if _, err := fs.Stat(svelte, f); err != nil {
-			t.Errorf("vite-svelte-bun: %s missing", f)
+	for _, id := range []string{"svelte", "react", "empty"} {
+		if !ids[id] {
+			t.Errorf("template %s missing", id)
 		}
 	}
-	for _, f := range []string{".cursor/hooks.json", ".cursor/sandbox.json", ".cursor/mcp.json"} {
-		if _, err := fs.Stat(svelte, f); err == nil {
-			t.Errorf("vite-svelte-bun ships agent config %s", f)
+	for _, p := range ts[:2] {
+		for _, f := range []string{".cursor/rules/00-ui8kit-core.mdc", ".cursor/skills/ui8kit-new-block/SKILL.md", ".ui8px/gate.json", "ui8kit.lock.json",
+			"src/fixtures/home.json", "src/i18n/en.json", "src/assets/fonts/istok-web/OFL.txt", "public/favicon.svg", "public/favicon.ico"} {
+			if _, err := fs.Stat(p.Files, f); err != nil {
+				t.Errorf("%s: %s missing", p.ID, f)
+			}
+		}
+	}
+	// Projects made from the former ids keep their profile.
+	for alias, id := range map[string]string{"vite-svelte-bun": "svelte", "vite-react-bun": "react"} {
+		found := false
+		for _, p := range ts {
+			if p.Is(alias) {
+				found = p.ID == id
+			}
+		}
+		if !found {
+			t.Errorf("alias %s does not resolve to %s", alias, id)
+		}
+	}
+}
+
+func TestTemplatesManifest(t *testing.T) {
+	files := fstest.MapFS{
+		"r/templates/a/package.json": {Data: []byte("{}")},
+		"r/templates/b/package.json": {Data: []byte("{}")},
+	}
+	ok := `{"schemaVersion":1,"templates":[{"id":"a","dir":"templates/a","name":"A","runner":"vite-bun","aliases":["old-a"]},{"id":"b","dir":"templates/b","name":"B","runner":"next-pnpm"}]}`
+	ts, err := templatesFrom([]byte(ok), files, "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ts) != 2 || !ts[0].Enabled || !ts[0].Is("old-a") || ts[1].Enabled || len(ts[1].Dev) != 0 {
+		t.Fatalf("profiles: %+v", ts)
+	}
+	for name, bad := range map[string]string{
+		"schema":    `{"schemaVersion":2,"templates":[]}`,
+		"duplicate": `{"schemaVersion":1,"templates":[{"id":"a","dir":"templates/a","runner":"vite-bun"},{"id":"b","dir":"templates/b","aliases":["a"]}]}`,
+		"missing":   `{"schemaVersion":1,"templates":[{"id":"c","dir":"templates/c","runner":"vite-bun"}]}`,
+		"json":      `{`,
+	} {
+		if _, err := templatesFrom([]byte(bad), files, "r"); err == nil || !strings.Contains(err.Error(), "templates.json") {
+			t.Errorf("%s: want a templates.json error, got %v", name, err)
 		}
 	}
 }

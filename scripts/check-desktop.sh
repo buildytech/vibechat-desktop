@@ -14,7 +14,7 @@ echo "check-desktop: $(wc -l <<<"$deps") module packages, none of server/"
 if [ $# -gt 0 ]; then
 	bin="$1"
 	# Markers of the local agent (bridge, SDK sandbox, permission hook), the templates and the local host.
-	for m in cursor-sdk-bridge cursorsandbox VIBECHAT_BRIDGE_DIR VIBECHAT_HOOK_EXE vite-svelte-bun VIBECHAT_PROJECTS_DIR server/internal/; do
+	for m in cursor-sdk-bridge cursorsandbox VIBECHAT_BRIDGE_DIR VIBECHAT_HOOK_EXE buildy-starter-svelte VIBECHAT_PROJECTS_DIR server/internal/; do
 		if grep -aqF -- "$m" "$bin"; then echo "check-desktop: $bin contains \"$m\"" >&2; exit 1; fi
 	done
 	echo "check-desktop: $bin has no local agent, templates or server code"
