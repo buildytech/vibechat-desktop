@@ -10,7 +10,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq incus >/dev/null
 incus admin init --minimal
-incus launch images:debian/13 vibechat-ci -c security.nesting=true -c limits.cpu=2 -c limits.memory=4GiB -d root,size=15GiB
+incus launch -q images:debian/13 vibechat-ci -c security.nesting=true -c limits.cpu=2 -c limits.memory=4GiB -d root,size=15GiB
 for _ in $(seq 1 60); do incus exec vibechat-ci -- getent hosts deb.debian.org >/dev/null 2>&1 && break; sleep 2; done
 incus file push "$deb" vibechat-ci/root/vibechat-server.deb
 incus file push "$smoke" vibechat-ci/root/server-smoke.sh

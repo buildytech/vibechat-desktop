@@ -8,12 +8,14 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 deb="$1"
 [ -e /dev/kvm ] || { echo "ci-server-debian: no /dev/kvm on this runner" >&2; exit 1; }
 sudo apt-get update -qq
-sudo apt-get install -y -qq incus >/dev/null
+# Incus finds QEMU (and the UEFI firmware) at start: install them first, restart it to be sure.
+sudo apt-get install -y -qq qemu-system-x86 ovmf incus >/dev/null
+sudo systemctl restart incus
 sudo incus admin init --minimal
 # Docker on the runner sets the FORWARD policy to DROP: let the Incus bridge reach the network.
 sudo iptables -P FORWARD ACCEPT
 vm=vibechat-d13
-sudo incus launch images:debian/13 "$vm" --vm -c limits.cpu=2 -c limits.memory=4GiB -d root,size=15GiB
+sudo incus launch -q images:debian/13 "$vm" --vm -c limits.cpu=2 -c limits.memory=4GiB -d root,size=15GiB
 for _ in $(seq 1 120); do sudo incus exec "$vm" -- true >/dev/null 2>&1 && break; sleep 2; done
 for _ in $(seq 1 60); do sudo incus exec "$vm" -- getent hosts deb.debian.org >/dev/null 2>&1 && break; sleep 2; done
 sudo incus file push "$deb" "$vm/root/vibechat-server.deb"
