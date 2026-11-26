@@ -19,11 +19,12 @@ import (
 //
 //  1. every step for real, but the lockdown is not confirmed: password login is off at once and comes back by
 //     itself when the rollback timer fires;
+//
 //  2. the second run skips every step that is done, takes the lockdown with the confirmation, and the app connects
 //     (ticket → the window's sign-in through the tunnel); root's password is refused from then on.
 //
-//	VIBECHAT_E2E_PROVISION_ADDR=<ip>:22 VIBECHAT_E2E_ROOT_PASSWORD_FILE=<file> VIBECHAT_E2E_DEB_URL=… \
-//	VIBECHAT_E2E_SUMS_URL=… go test -tags e2e -run TestProvisionE2E ./internal/remote
+//     VIBECHAT_E2E_PROVISION_ADDR=<ip>:22 VIBECHAT_E2E_ROOT_PASSWORD_FILE=<file> VIBECHAT_E2E_DEB_URL=… \
+//     VIBECHAT_E2E_SUMS_URL=… go test -tags e2e -run TestProvisionE2E ./internal/remote
 func TestProvisionE2E(t *testing.T) {
 	addr, pwFile := os.Getenv("VIBECHAT_E2E_PROVISION_ADDR"), os.Getenv("VIBECHAT_E2E_ROOT_PASSWORD_FILE")
 	if addr == "" || pwFile == "" {
