@@ -37,6 +37,9 @@ type session struct {
 	pin        ssh.PublicKey
 	logf       func(string)
 
+	// pp is the per-project preview fallback (nil: the gateway port is forwarded as raw TCP).
+	pp *previewPorts
+
 	mu      sync.Mutex
 	client  *ssh.Client
 	closed  bool
@@ -246,7 +249,7 @@ var errPortBusy = errors.New("local port busy")
 
 // serveProxy starts the window's origin http://127.0.0.1:<port> (port 0 = any): the server's Studio and seam through
 // the tunnel, with local answers for the paths in local (the desktop connection routes).
-func (s *session) serveProxy(port int, sessionPath string, local func(w http.ResponseWriter, r *http.Request) bool) (string, int, error) {
+func (s *session) serveProxy(port int, prefix, sessionPath string, local func(w http.ResponseWriter, r *http.Request) bool) (string, int, error) {
 	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 	if err != nil && port != 0 {
 		ln, err = net.Listen("tcp", "127.0.0.1:0")
@@ -259,12 +262,20 @@ func (s *session) serveProxy(port int, sessionPath string, local func(w http.Res
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
 			pr.Out.Host = ServerAPI
+			if s.pp != nil {
+				pr.Out.Header.Del("Accept-Encoding") // the preview URLs are rewritten in plain JSON
+			}
 		},
 		Transport:     s.tr,
 		FlushInterval: -1, // SSE
 		// A server before 0.1.6 answers the sign-in with 303 → "/": that hop would carry the app's own origin as
 		// the initiator and drop the SameSite=Strict cookie (auth.SignedInHTML), so the proxy answers the page.
 		ModifyResponse: func(res *http.Response) error {
+			if s.pp != nil {
+				if err := s.pp.rewriteJSON(prefix, res); err != nil {
+					return err
+				}
+			}
 			if res.Request.URL.Path != sessionPath || res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/" {
 				return nil
 			}
@@ -308,7 +319,7 @@ func (s *session) serveProxy(port int, sessionPath string, local func(w http.Res
 
 // forward listens on 127.0.0.1:<port> and [::1]:<port> (the same port as on the server: the preview gateway routes
 // by Host "<id>.preview.localhost:<port>") and pipes each connection to 127.0.0.1:<port> on the server.
-func (s *session) forward(port int) error {
+func (s *session) forward(port int, perProject bool) error {
 	remote := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	ln4, err := net.Listen("tcp", remote)
 	if err != nil {
@@ -323,6 +334,17 @@ func (s *session) forward(port int) error {
 	s.mu.Lock()
 	s.lns = append(s.lns, lns...)
 	s.mu.Unlock()
+	if perProject {
+		s.pp = newPreviewPorts(s, port)
+		for _, ln := range lns {
+			srv := &http.Server{ReadHeaderTimeout: 30 * time.Second, Handler: s.pp.gatewayHandler()}
+			s.mu.Lock()
+			s.servers = append(s.servers, srv)
+			s.mu.Unlock()
+			go func() { _ = srv.Serve(ln) }()
+		}
+		return nil
+	}
 	for _, ln := range lns {
 		s.wg.Add(1)
 		go func() {
@@ -376,6 +398,9 @@ func (s *session) close() {
 		_ = ln.Close()
 	}
 	s.tr.CloseIdleConnections()
+	if s.pp != nil {
+		s.pp.tr.CloseIdleConnections()
+	}
 	if c != nil {
 		_ = c.Close()
 	}

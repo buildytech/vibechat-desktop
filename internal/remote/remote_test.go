@@ -42,6 +42,9 @@ func fakeServer(t *testing.T, minClient, previewPort int, legacy303 bool) *httpt
 		}
 		writeJSON(w, 200, map[string]string{"ticket": tk, "expiresAt": exp.Format(time.RFC3339)})
 	})
+	mux.HandleFunc("GET /runtime/v1/projects", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, []map[string]any{{"id": "abc123", "preview_url": "http://abc123.preview.localhost:" + strconv.Itoa(previewPort) + "/"}})
+	})
 	mux.HandleFunc("GET /runtime/v1/host/capabilities", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{"seam": "1"})
 	})
@@ -111,11 +114,14 @@ type rig struct {
 
 func newRig(t *testing.T, minClient int) *rig { return newRigWith(t, minClient, false) }
 
+// perProject: the next manager uses the per-project preview ports (the WKWebView fallback).
+var perProject bool
+
 func newRigWith(t *testing.T, minClient int, legacy303 bool) *rig {
 	t.Helper()
 	preview := freePort(t)
 	previewS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprintf(w, "preview gateway saw Host %s", r.Host)
+		_, _ = fmt.Fprintf(w, "preview gateway saw Host %s Origin %s", r.Host, r.Header.Get("Origin"))
 	}))
 	t.Cleanup(previewS.Close)
 	api := fakeServer(t, minClient, preview, legacy303)
@@ -139,8 +145,9 @@ func (r *rig) manager() *Manager {
 	m, err := New(Options{
 		DataDir: r.data, Creds: r.creds, AppVersion: "0.1.5", AppProtocol: 1, MinServerProtocol: 1,
 		Prefix: "/runtime/v1", SessionPath: "/auth/session", TicketParam: "ticket",
-		Navigate: func(u string) { r.nav <- u },
-		Log:      func(s string) { r.t.Log(s) },
+		Navigate:              func(u string) { r.nav <- u },
+		PreviewPortPerProject: perProject,
+		Log:                   func(s string) { r.t.Log(s) },
 	})
 	if err != nil {
 		r.t.Fatal(err)
@@ -538,4 +545,60 @@ func TestLegacySessionRedirect(t *testing.T) {
 	}
 	u := r.navigated()
 	signIn(t, browser(t), u, u[:strings.Index(u, "/auth/")])
+}
+
+// TestPreviewPortPerProject: the WKWebView fallback. The project list's preview URL becomes http://127.0.0.1:<P>;
+// that origin reaches the gateway as <id>.preview.localhost:<gw> with Origin mapped; the local gateway port maps a
+// request from http://127.0.0.1:<P> (Vite's HMR socket) to the same project.
+func TestPreviewPortPerProject(t *testing.T) {
+	perProject = true
+	r := newRig(t, 1)
+	perProject = false
+	if c := r.connect(testToken); c.Problem != nil {
+		t.Fatal(c.Problem)
+	}
+	u := r.navigated()
+	origin := u[:strings.Index(u, "/auth/")]
+	c := browser(t)
+	signIn(t, c, u, origin)
+	res, err := c.Get(origin + "/runtime/v1/projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list []map[string]string
+	_ = json.NewDecoder(res.Body).Decode(&list)
+	res.Body.Close()
+	if len(list) != 1 || !strings.HasPrefix(list[0]["preview_url"], "http://127.0.0.1:") || !strings.HasSuffix(list[0]["preview_url"], "/") {
+		t.Fatalf("projects: %v", list)
+	}
+	local := strings.TrimSuffix(list[0]["preview_url"], "/")
+	gw := "abc123.preview.localhost:" + strconv.Itoa(r.preview)
+	get := func(u, origin string) string {
+		req, _ := http.NewRequest("GET", u, nil)
+		req.Header.Set("Origin", origin)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return string(b)
+	}
+	want := "Host " + gw + " Origin http://" + gw
+	if got := get(local+"/", local); !strings.Contains(got, want) {
+		t.Fatalf("per-project origin: %q, want %q", got, want)
+	}
+	if got := get("http://127.0.0.1:"+strconv.Itoa(r.preview)+"/hmr", local); !strings.Contains(got, want) {
+		t.Fatalf("HMR via the gateway port: %q, want %q", got, want)
+	}
+	if got := get("http://127.0.0.1:"+strconv.Itoa(r.preview)+"/", "http://127.0.0.1:1"); !strings.Contains(got, "no preview here") {
+		t.Fatalf("unknown origin on the gateway port: %q", got)
+	}
+	// The same list again: the same local origin.
+	res, _ = c.Get(origin + "/runtime/v1/projects")
+	_ = json.NewDecoder(res.Body).Decode(&list)
+	res.Body.Close()
+	if strings.TrimSuffix(list[0]["preview_url"], "/") != local {
+		t.Fatalf("origin changed: %v", list)
+	}
 }

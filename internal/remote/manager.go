@@ -50,6 +50,9 @@ type Options struct {
 	Prefix            string // "/runtime/v1"
 	SessionPath       string // "/auth/session"
 	TicketParam       string // "ticket"
+	// PreviewPortPerProject: the webview does not resolve *.preview.localhost (WKWebView): every preview gets a
+	// local port of its own (previewports.go).
+	PreviewPortPerProject bool
 	// Navigate moves the window ("http://127.0.0.1:L/auth/session?ticket=…", or "/" back to the app's own Studio).
 	// It is called on its own goroutine.
 	Navigate func(url string)
@@ -294,12 +297,12 @@ func (m *Manager) connect(ctx context.Context, in ConnectInput, resume bool) {
 		return
 	}
 	if hello.PreviewPort > 0 {
-		if err := s.forward(hello.PreviewPort); err != nil {
+		if err := s.forward(hello.PreviewPort, m.o.PreviewPortPerProject); err != nil {
 			fail(ProblemPortBusy, err.Error(), false)
 			return
 		}
 	}
-	origin, port, err := s.serveProxy(next.ProxyPort, m.o.SessionPath, m.serveLocal)
+	origin, port, err := s.serveProxy(next.ProxyPort, m.o.Prefix, m.o.SessionPath, m.serveLocal)
 	if err != nil {
 		fail(ProblemPortBusy, err.Error(), false)
 		return
