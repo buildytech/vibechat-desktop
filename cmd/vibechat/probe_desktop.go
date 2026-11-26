@@ -11,6 +11,7 @@ import (
 	"os"
 	goruntime "runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,11 @@ type probeResult struct {
 	CookieLax     bool   `json:"cookieLax"`     // SameSite=Lax cookie returned (iframe: expected false, cross-site)
 	CORSFetch     bool   `json:"corsFetch"`     // the top page's cross-origin fetch to the name worked
 	FetchError    string `json:"fetchError,omitempty"`
+	// Why a failure: GoResolve is the system resolver's answer for the name (DNS), CORSLocalhost / CORSIP the same
+	// fetch to http://localhost:<port> and http://127.0.0.1:<port> (macOS App Transport Security exempts both).
+	GoResolve     string `json:"goResolve"`
+	CORSLocalhost bool   `json:"corsLocalhost"`
+	CORSIP        bool   `json:"corsIp"`
 	UserAgent     string `json:"userAgent,omitempty"`
 	TimedOut      bool   `json:"timedOut,omitempty"`
 }
@@ -86,6 +92,12 @@ func probeLocalhost() int {
 		go func() { _ = http.Serve(gw6, gw) }() // *.localhost may resolve to ::1 first
 	}
 
+	if addrs, err := net.LookupHost("probe.preview.localhost"); err != nil {
+		res.GoResolve = "error: " + err.Error()
+	} else {
+		res.GoResolve = strings.Join(addrs, ",")
+	}
+
 	page, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		fmt.Println("probe-localhost: listen:", err)
@@ -99,19 +111,24 @@ func probeLocalhost() int {
 (async () => {
   const r = { ua: navigator.userAgent }
   try { r.cors = (await fetch("http://%[1]s/cors")).ok } catch (e) { r.cors = false; r.err = String(e) }
+  try { r.corsLocalhost = (await fetch("http://localhost:%[2]d/cors")).ok } catch (e) { r.corsLocalhost = false }
+  try { r.corsIp = (await fetch("http://127.0.0.1:%[2]d/cors")).ok } catch (e) { r.corsIp = false }
   setTimeout(() => fetch("/result", { method: "POST", body: JSON.stringify(r) }), 3000)
 })()
-</script>`, gwHost)
+</script>`, gwHost, port)
 	})
 	pm.HandleFunc("/result", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			UA   string `json:"ua"`
-			CORS bool   `json:"cors"`
-			Err  string `json:"err"`
+			UA            string `json:"ua"`
+			CORS          bool   `json:"cors"`
+			CORSLocalhost bool   `json:"corsLocalhost"`
+			CORSIP        bool   `json:"corsIp"`
+			Err           string `json:"err"`
 		}
 		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body)
 		mu.Lock()
 		res.UserAgent, res.CORSFetch, res.FetchError = body.UA, body.CORS, body.Err
+		res.CORSLocalhost, res.CORSIP = body.CORSLocalhost, body.CORSIP
 		mu.Unlock()
 		finish()
 	})

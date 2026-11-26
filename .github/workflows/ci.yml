@@ -110,6 +110,16 @@ jobs:
         run: |
           export VIBECHAT_VERSION="${VIBECHAT_VERSION#v}"
           bash scripts/package-server.sh
+      # The same probe from the shipped .app: its Info.plist (App Transport Security exceptions for localhost and its
+      # subdomains) applies only inside the bundle. Reported, not gating.
+      - name: Webview *.localhost probe (macOS .app bundle)
+        if: runner.os == 'macOS'
+        timeout-minutes: 3
+        run: |
+          set +e
+          "bin/BuildY VibeChat.app/Contents/MacOS/vibechat" --probe-localhost; code=$?
+          [ "$code" = 0 ] || echo "::warning::webview *.localhost probe failed in the macOS .app (exit $code)"
+          exit 0
       # Agent runtime smoke from the shipped zip: unpack under a path with spaces and Cyrillic, run the app's own
       # --bridge-smoke (locate bridge next to the exe, sandbox preflight, private HOME/USERPROFILE, ready + Ping).
       - name: Bridge smoke from the portable zip
