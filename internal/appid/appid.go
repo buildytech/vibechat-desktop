@@ -14,6 +14,8 @@ const (
 	Binary = "vibechat"
 	// Company is the publisher shown by installers.
 	Company = "BuildY"
+	// KeychainService names the OS keychain items of the app (its SSH key and the host token).
+	KeychainService = "vibechat-desktop"
 )
 
 // Version is the app version the build was stamped with: CI and scripts/package.sh set it with

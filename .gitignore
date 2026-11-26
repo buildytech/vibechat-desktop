@@ -1,8 +1,10 @@
-/frontend/dist/*
-!/frontend/dist/.gitkeep
+/server/frontend/dist/*
+!/server/frontend/dist/.gitkeep
+/desktop/shell/dist/*
+!/desktop/shell/dist/.gitkeep
 /bin/
 /dist/
-/cmd/vibechat/*.syso
+/desktop/cmd/vibechat/*.syso
 /vendor-bridge/
 /build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
 /.bridge-cache/

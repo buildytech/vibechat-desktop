@@ -2,5 +2,5 @@
 	path = third_party/studio
 	url = https://github.com/buildytech/studio
 [submodule "third_party/templates"]
-	path = third_party/templates
+	path = server/third_party/templates
 	url = https://github.com/buildytech/templates
