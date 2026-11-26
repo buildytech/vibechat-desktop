@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the Studio (apps/studio `build:desktop`) from the pinned submodule third_party/studio (Bun, its own lockfile and
-# scripts) and copies the static site into frontend/dist, which the Go binary embeds. Nothing is edited in the
+# scripts) and copies the static site into server/frontend/dist, which vibechat-server embeds. Nothing is edited in the
 # submodule.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -12,8 +12,8 @@ command -v bun >/dev/null || { echo "build-frontend: bun is required (https://bu
 	bun run build:desktop
 )
 [ -n "$(git -C third_party/studio status --porcelain --untracked-files=no)" ] && { echo "build-frontend: the build changed tracked files in third_party/studio" >&2; git -C third_party/studio status --short >&2; exit 1; }
-rm -rf frontend/dist
-mkdir -p frontend/dist
-cp -R third_party/studio/apps/studio/dist/. frontend/dist/
-touch frontend/dist/.gitkeep
-echo "build-frontend: frontend/dist from studio $(git -C third_party/studio rev-parse --short HEAD)"
+rm -rf server/frontend/dist
+mkdir -p server/frontend/dist
+cp -R third_party/studio/apps/studio/dist/. server/frontend/dist/
+touch server/frontend/dist/.gitkeep
+echo "build-frontend: server/frontend/dist from studio $(git -C third_party/studio rev-parse --short HEAD)"

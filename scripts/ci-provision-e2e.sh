@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# CI (GitHub ubuntu runner with KVM): the setup wizard (internal/provision) end to end against a fresh Debian 13
+# CI (GitHub ubuntu runner with KVM): the setup wizard (desktop/internal/provision) end to end against a fresh Debian 13
 # Incus VM shaped like a user's VPS: sshd with root password login on (as provider images do), nothing else.
 # The runner serves the job's vibechat-server .deb with a SHA256SUMS over HTTP to the VM (the wizard downloads and
-# checks it there); `go test -tags e2e -run TestProvisionE2E ./internal/remote` runs the wizard twice (the
+# checks it there); `go test -tags e2e -run TestProvisionE2E ./desktop/internal/remote` runs the wizard twice (the
 # lockdown's rollback without a confirmation, then the rerun, the confirmation and the app's connection); then this
 # script checks from outside: the container's limits and nesting, an unprivileged container, the egress allowlist
 # (allowed hosts reachable, others not), sshd keys-only, no rollback timer left, no Incus API on the network.
@@ -50,7 +50,7 @@ for _ in $(seq 1 50); do in_vm curl -fsS -o /dev/null "http://$gw:8099/SHA256SUM
 echo "::group::The wizard, twice (go test -tags e2e -run TestProvisionE2E)"
 VIBECHAT_E2E_PROVISION_ADDR="$ip:22" VIBECHAT_E2E_ROOT_PASSWORD_FILE="$work/rootpw" \
 	VIBECHAT_E2E_DEB_URL="http://$gw:8099/vibechat-server-linux-amd64.deb" VIBECHAT_E2E_SUMS_URL="http://$gw:8099/SHA256SUMS" \
-	go test -tags e2e -count=1 -timeout 50m -run TestProvisionE2E -v ./internal/remote
+	go test -tags e2e -count=1 -timeout 50m -run TestProvisionE2E -v ./desktop/internal/remote
 echo "::endgroup::"
 
 echo "::group::Checks from outside"

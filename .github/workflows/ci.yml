@@ -8,6 +8,8 @@ on:
 permissions:
   contents: read
 jobs:
+  # The desktop app (desktop/): a window to the owner's vibechat-server, no local agent. Start screen from the pinned
+  # studio (build:shell), the app's tests, the build, the check that it links no server or agent code, installers.
   build:
     strategy:
       fail-fast: false
@@ -17,7 +19,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       # The app version: scripts/package.sh and the desktop build stamp it (internal/appid.Version); a v* tag wins.
-      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.1.7' }}
+      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.0' }}
     defaults:
       run:
         shell: bash
@@ -36,42 +38,20 @@ jobs:
       - name: Linux GUI libraries (GTK 4, WebKitGTK 6)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
-      - name: Studio from the pinned studio submodule
-        run: bash scripts/build-frontend.sh
+      - name: Start screen from the pinned studio submodule (build:shell)
+        run: bash scripts/build-shell.sh
       - name: Vet
-        run: go vet ./ ./internal/... ./cmd/...
-      - name: Tests (unit, host seam contract)
-        run: go test -count=1 -v ./ ./internal/... ./cmd/...
-      # Project creation e2e (templates.Scaffold + host.InstallDeps, the app's code) with the oldest supported Bun and
-      # the current one, under a parent folder with spaces and Cyrillic like a real user profile.
-      - name: Templates install e2e (Bun 1.3.3)
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.3
-      - name: Templates install e2e run (Bun 1.3.3)
-        run: |
-          bun --version
-          d="$RUNNER_TEMP/Профиль пользователя/VibeChat 133"
-          mkdir -p "$d"
-          VIBECHAT_E2E_INSTALL=1 VIBECHAT_E2E_DIR="$d" go test -count=1 -v -run TestTemplatesInstallE2E .
-      - name: Templates install e2e (current Bun)
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.4
-      - name: Templates install e2e run (current Bun)
-        run: |
-          bun --version
-          d="$RUNNER_TEMP/Профиль пользователя/VibeChat 144"
-          mkdir -p "$d"
-          VIBECHAT_E2E_INSTALL=1 VIBECHAT_E2E_DIR="$d" go test -count=1 -v -run TestTemplatesInstallE2E .
-      # The old headless Wails build (no auth, loopback): kept for local tests and the exam until they move to
-      # cmd/vibechat-server.
-      - name: Headless build (Wails, server tag)
-        run: go build -tags server -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat-headless ./cmd/vibechat
-      - name: Server build (cmd/vibechat-server, net/http)
-        run: go build -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat-server-check ./cmd/vibechat-server
+        run: go vet ./ ./protocol/... ./internal/... ./desktop/...
+      - name: Tests (the app, its contract, the shared packages)
+        run: go test -count=1 -v ./ ./protocol/... ./internal/... ./desktop/...
       - name: Desktop build
-        run: go build -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat ./cmd/vibechat
+        run: go build -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat ./desktop/cmd/vibechat
+      # No local agent in the app: the Go packages it links (only desktop/, protocol/ and four shared ones) and the
+      # binary itself (no bridge, sandbox, hook, templates or server markers).
+      - name: No local agent in the desktop build
+        run: |
+          exe=bin/vibechat; [ -f bin/vibechat.exe ] && exe=bin/vibechat.exe
+          bash scripts/check-desktop.sh "$exe"
       # Can this platform's webview frame the server's preview gateway at http://<id>.preview.localhost:<port>
       # (WebView2 / WKWebView / WebKitGTK)? Real window, fake gateway; prints one JSON line. Reported, not gating.
       - name: Webview *.localhost probe
@@ -104,12 +84,22 @@ jobs:
           export VIBECHAT_VERSION="${VIBECHAT_VERSION#v}"
           bash scripts/package.sh
           ls dist/vibechat-desktop-*.zip
-      # The server .deb (Linux): /usr/lib/vibechat-server + systemd units (vibechat-server, vibechat-update.timer).
-      - name: Server package (scripts/package-server.sh, Linux)
-        if: runner.os == 'Linux'
+      # The shipped executable again: no agent runtime next to it, no local agent inside, and it starts (--version).
+      - name: Shipped app (portable zip) is the thin client
         run: |
-          export VIBECHAT_VERSION="${VIBECHAT_VERSION#v}"
-          bash scripts/package-server.sh
+          root="$RUNNER_TEMP/Профиль пользователя/Downloads"
+          rm -rf "$root" && mkdir -p "$root"
+          zip=$(ls dist/vibechat-desktop-*.zip)
+          case "$RUNNER_OS" in
+            Windows) 7z x -bso0 -bsp0 -o"$root" "$zip"; exe="$root/vibechat-desktop-windows-x64/vibechat.exe" ;;
+            macOS)   ditto -x -k "$zip" "$root"; exe="$root/BuildY VibeChat.app/Contents/MacOS/vibechat" ;;
+            Linux)   unzip -q "$zip" -d "$root"; exe="$root/vibechat-desktop-linux-x64/vibechat" ;;
+          esac
+          if find "$root" -name bridge -o -name cursor-sdk-bridge -o -name 'cursorsandbox*' | grep -q .; then
+            echo "the shipped app carries an agent runtime" >&2; find "$root" | head -50; exit 1
+          fi
+          bash scripts/check-desktop.sh "$exe"
+          if [ "$RUNNER_OS" != Linux ]; then "$exe" --version || true; fi
       # The same probe from the shipped .app: its Info.plist (App Transport Security exceptions for localhost and its
       # subdomains) applies only inside the bundle. Reported, not gating.
       - name: Webview *.localhost probe (macOS .app bundle)
@@ -120,85 +110,12 @@ jobs:
           "bin/BuildY VibeChat.app/Contents/MacOS/vibechat" --probe-localhost; code=$?
           [ "$code" = 0 ] || echo "::warning::webview *.localhost probe failed in the macOS .app (exit $code)"
           exit 0
-      # Agent runtime smoke from the shipped zip: unpack under a path with spaces and Cyrillic, run the app's own
-      # --bridge-smoke (locate bridge next to the exe, sandbox preflight, private HOME/USERPROFILE, ready + Ping).
-      - name: Bridge smoke from the portable zip
-        run: |
-          root="$RUNNER_TEMP/Профиль пользователя/Downloads"
-          rm -rf "$root" && mkdir -p "$root"
-          zip=$(ls dist/vibechat-desktop-*.zip)
-          case "$RUNNER_OS" in
-            Windows) 7z x -bso0 -bsp0 -o"$root" "$zip"; exe="$root/vibechat-desktop-windows-x64/vibechat.exe" ;;
-            macOS)   ditto -x -k "$zip" "$root"; exe="$root/BuildY VibeChat.app/Contents/MacOS/vibechat" ;;
-            Linux)   unzip -q "$zip" -d "$root"; exe="$root/vibechat-desktop-linux-x64/vibechat" ;;
-          esac
-          export VIBECHAT_DATA_DIR="$RUNNER_TEMP/Профиль пользователя/AppData/tw.buildy.vibechat"
-          "$exe" --version > smoke.txt 2>&1 || true
-          set +e
-          "$exe" --bridge-smoke >> smoke.txt 2>&1
-          code=$?
-          set -e
-          cat smoke.txt
-          echo "--- log"; cat "$VIBECHAT_DATA_DIR/logs/vibechat.log" || true
-          # 3 = the runner has no SDK sandbox (GitHub Linux runners lack Landlock); the bridge is not started then.
-          if [ "$code" = 3 ] && [ "$RUNNER_OS" = Linux ]; then echo "::warning::bridge smoke skipped: no SDK sandbox on this runner"; exit 0; fi
-          exit $code
-      # x64 bridges are recompiled on the Bun baseline runtime (cmd/fetch-bridge, bridge.lock.json baselineRuntime):
-      # the upstream build needs AVX2 and dies with 0xC000001D / SIGILL on older CPUs. Static check of the shipped
-      # folder: manifest runtime bun-*-baseline and machine code identical to the pinned baseline Bun.
-      - name: Bridge is the Bun baseline build (x64)
-        if: runner.os != 'macOS'
-        run: |
-          root="$RUNNER_TEMP/Профиль пользователя/Downloads"
-          case "$RUNNER_OS" in
-            Windows) d="$root/vibechat-desktop-windows-x64/bridge" ;;
-            Linux)   d="$root/vibechat-desktop-linux-x64/bridge" ;;
-          esac
-          go run ./cmd/fetch-bridge -verify "$d" -cache "${BRIDGE_CACHE:-.bridge-cache}"
-      # Dynamic check on a CPU without AVX/AVX2: QEMU user mode, -cpu Nehalem-v2, bridge until ready, the sandbox
-      # helper and rg; the upstream AVX2 bridge as the control must hit SIGILL there.
-      - name: Bridge without AVX2 (QEMU -cpu Nehalem-v2, Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get install -y qemu-user >/dev/null
-          root="$RUNNER_TEMP/Профиль пользователя/Downloads"
-          bash scripts/bridge-qemu-smoke.sh "$root/vibechat-desktop-linux-x64/bridge" "${BRIDGE_CACHE:-.bridge-cache}/cursor-sdk-bridge-standalone-linux-x64.tar.gz"
-      # The NSIS installer layout (per-machine, Program Files, read-only for the user): the same smoke from there.
-      - name: Bridge smoke from the installed app (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          powershell -NoProfile -Command "Start-Process -FilePath dist\vibechat-amd64-installer.exe -ArgumentList '/S' -Wait"
-          exe="/c/Program Files/BuildY/BuildY VibeChat/vibechat.exe"
-          ls -la "$(dirname "$exe")" "$(dirname "$exe")/bridge"
-          go run ./cmd/fetch-bridge -verify "$(dirname "$exe")/bridge" -cache "${BRIDGE_CACHE:-.bridge-cache}"
-          unset VIBECHAT_DATA_DIR # the real default: %APPDATA%\tw.buildy.vibechat
-          set +e
-          "$exe" --bridge-smoke > smoke-installed.txt 2>&1
-          code=$?
-          set -e
-          cat smoke-installed.txt
-          echo "--- log"; cat "$APPDATA/tw.buildy.vibechat/logs/vibechat.log" || true
-          exit $code
-      # A real agent run (Composer 2.5 Fast, "Reply OK") through the app's path: menu from the key's model list →
-      # Select → create → Send. Only when the repository has the VIBECHAT_LIVE_CURSOR_KEY secret (a Cursor-type key);
-      # skipped otherwise. Windows: GitHub Linux runners have no SDK sandbox.
-      - name: Live agent run (Windows, VIBECHAT_LIVE_CURSOR_KEY secret only)
-        if: runner.os == 'Windows'
-        env:
-          CURSOR_API_KEY: ${{ secrets.VIBECHAT_LIVE_CURSOR_KEY }}
-        run: |
-          if [ -z "$CURSOR_API_KEY" ]; then echo "::notice::no VIBECHAT_LIVE_CURSOR_KEY secret: live agent run skipped"; exit 0; fi
-          hook=$(ls "$PWD"/bin/vibechat.exe 2>/dev/null || echo "$PWD/bin/vibechat")
-          VIBECHAT_BRIDGE_DIR="$PWD/bin/bridge" VIBECHAT_HOOK_EXE="$hook" VIBECHAT_LIVE_MENU=cursor/composer-2.5-fast \
-            go test -count=1 -tags live -run TestLiveMenuRuns -v ./internal/agent
-      # The bare executable with the agent runtime next to it (bin/bridge: cursor-sdk-bridge + sandbox helper).
       - uses: actions/upload-artifact@v4
         with:
           name: vibechat-${{ matrix.os }}
           path: |
             bin/vibechat
             bin/vibechat.exe
-            bin/bridge/
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4
@@ -207,11 +124,88 @@ jobs:
           path: dist/
           retention-days: 14
 
+  # vibechat-server (server/): the Studio from the pinned studio submodule, the server's tests (the host seam contract,
+  # the agent, templates, previews), project creation with the oldest and the current Bun, the agent runtime
+  # (cursor-sdk-bridge on the Bun baseline build, checked statically and under QEMU without AVX2) and the .deb.
+  server:
+    runs-on: ubuntu-24.04
+    env:
+      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.0' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Studio from the pinned studio submodule
+        run: bash scripts/build-frontend.sh
+      - name: Vet
+        run: go vet ./server/...
+      - name: Tests (unit, host seam contract)
+        run: go test -count=1 -v ./server/...
+      # Project creation e2e (templates.Scaffold + host.InstallDeps, the server's code) with the oldest supported Bun
+      # and the current one, under a parent folder with spaces and Cyrillic.
+      - name: Templates install e2e (Bun 1.3.3)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.3
+      - name: Templates install e2e run (Bun 1.3.3)
+        run: |
+          bun --version
+          d="$RUNNER_TEMP/Профиль пользователя/VibeChat 133"
+          mkdir -p "$d"
+          VIBECHAT_E2E_INSTALL=1 VIBECHAT_E2E_DIR="$d" go test -count=1 -v -run TestTemplatesInstallE2E ./server
+      - name: Templates install e2e (current Bun)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Templates install e2e run (current Bun)
+        run: |
+          bun --version
+          d="$RUNNER_TEMP/Профиль пользователя/VibeChat 144"
+          mkdir -p "$d"
+          VIBECHAT_E2E_INSTALL=1 VIBECHAT_E2E_DIR="$d" go test -count=1 -v -run TestTemplatesInstallE2E ./server
+      - name: Server build (server/cmd/vibechat-server, net/http)
+        run: go build -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat-server-check ./server/cmd/vibechat-server
+      - name: Packaging tools (the wails3 CLI, its nfpm packs the .deb)
+        run: |
+          go install "github.com/wailsapp/wails/v3/cmd/wails3@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)"
+          sudo apt-get update && sudo apt-get install -y dpkg-dev file >/dev/null
+      - name: Agent runtime (server/cmd/fetch-bridge, server/bridge.lock.json)
+        run: go run ./server/cmd/fetch-bridge -out bin/bridge -cache "${BRIDGE_CACHE:-.bridge-cache}"
+      # x64 bridges are recompiled on the Bun baseline runtime (baselineRuntime in the lock): the upstream build needs
+      # AVX2 and dies with SIGILL on older CPUs. Static check: manifest runtime bun-*-baseline, machine code identical
+      # to the pinned baseline Bun.
+      - name: Bridge is the Bun baseline build (x64)
+        run: go run ./server/cmd/fetch-bridge -verify bin/bridge -cache "${BRIDGE_CACHE:-.bridge-cache}"
+      # Dynamic check on a CPU without AVX/AVX2: QEMU user mode, -cpu Nehalem-v2, bridge until ready, the sandbox
+      # helper and rg; the upstream AVX2 bridge as the control must hit SIGILL there.
+      - name: Bridge without AVX2 (QEMU -cpu Nehalem-v2)
+        run: |
+          sudo apt-get install -y qemu-user >/dev/null
+          bash scripts/bridge-qemu-smoke.sh bin/bridge "${BRIDGE_CACHE:-.bridge-cache}/cursor-sdk-bridge-standalone-linux-x64.tar.gz"
+      # The server .deb: /usr/lib/vibechat-server + systemd units (vibechat-server, vibechat-update.timer).
+      - name: Server package (scripts/package-server.sh)
+        run: |
+          export VIBECHAT_VERSION="${VIBECHAT_VERSION#v}"
+          bash scripts/package-server.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vibechat-server
+          path: dist/vibechat-server-linux-amd64.deb
+          if-no-files-found: error
+          retention-days: 14
+
   # The server .deb on Debian 13 (the only supported server OS): a Debian 13 Incus VM (real Debian kernel, systemd)
   # with the install + auth smoke and the SDK sandbox preflight required, then an Incus container inside it like a
-  # user's server (scripts/ci-server-debian.sh). The binaries are still built on the Ubuntu runner above.
+  # user's server (scripts/ci-server-debian.sh). The .deb comes from the server job.
   server-debian:
-    needs: build
+    needs: server
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -223,7 +217,7 @@ jobs:
           go-version-file: go.mod
       - uses: actions/download-artifact@v4
         with:
-          name: vibechat-installer-ubuntu-24.04
+          name: vibechat-server
           path: dist
       - name: Server on Debian 13 (Incus VM, the desktop SSH connection e2e, then an Incus container inside it)
         run: bash scripts/ci-server-debian.sh dist/vibechat-server-linux-amd64.deb
@@ -232,7 +226,7 @@ jobs:
   # sshd and a root password like a VPS; the wizard runs twice (lockdown rollback without a confirmation, then the
   # rerun skipping what is done), then limits, egress allowlist, keys-only sshd and the app's connection are checked.
   provision-debian:
-    needs: build
+    needs: server
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -244,7 +238,7 @@ jobs:
           go-version-file: go.mod
       - uses: actions/download-artifact@v4
         with:
-          name: vibechat-installer-ubuntu-24.04
+          name: vibechat-server
           path: dist
       - name: Setup wizard on a Debian 13 VPS (Incus VM)
         run: bash scripts/ci-provision-e2e.sh dist/vibechat-server-linux-amd64.deb
@@ -252,7 +246,7 @@ jobs:
   # Tag v* → GitHub Release with stable asset names, so
   # https://github.com/buildytech/vibechat-desktop/releases/latest/download/<name> always points at the newest build.
   release:
-    needs: [build, server-debian, provision-debian]
+    needs: [build, server, server-debian, provision-debian]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
@@ -263,55 +257,36 @@ jobs:
           pattern: vibechat-installer-*
           path: dist
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: vibechat-server
+          path: dist
       - name: Release notes
         run: |
           cat > notes.md <<'EOF'
-          ## 0.1.7
+          ## 0.2.0: the app is a window to your server / Приложение — окно к вашему серверу
 
-          **New: server setup wizard / Новое: мастер настройки сервера.** Settings → Set up a new server: enter a fresh
-          Debian 13 VPS's address and the root password once (kept in memory for this run only, never stored). Over SSH
-          the app runs ten idempotent steps: checks the system (Debian 13 x86_64 only, otherwise it stops), installs
-          Incus (no network API: the app never gets Incus access), creates an unprivileged Debian 13 container
-          (`security.nesting`, 2 CPU / 4 GiB / 15 GiB, the disk quota enforced on a btrfs pool), installs
-          vibechat-server (`.deb` checked against `SHA256SUMS`) and Bun, limits the container's internet to Cursor, npm,
-          Bun and GitHub (an Incus network ACL by IP, refreshed every 10 minutes), puts a new host token straight into the
-          app's keychain, adds a `vibechat-tunnel` user that may only forward the two ports, pins the host key, checks the
-          connection, and finally turns off SSH password login (root included). A `systemd-run` timer turns password login
-          back on after 5 minutes unless the app confirms that its own key login works. An optional root public key can be
-          added in the form. Then the app connects to the server.
+          **Breaking: the desktop app no longer runs anything on this computer.** No local agent, no local projects, no
+          templates: the agent, projects and previews run on your own server, **Debian 13 "trixie" x86_64** (one Incus
+          container per user). On start the app shows two choices: **Connect a server** (one you already have, over SSH) or
+          **Set up a new server** (the wizard: a fresh VPS's address and the root password once; it installs Incus, the
+          container and vibechat-server, then turns off password login). Once a server is saved, the app reconnects at start
+          and opens the server's Studio directly. Projects made by earlier versions on this computer stay in `~/VibeChat`; the
+          app no longer opens them (copy them to the server if you need them).
 
-          Настройки → «Настроить новый сервер»: адрес и пароль root вводятся один раз (пароль не сохраняется); мастер ставит
-          Incus и изолированный контейнер с vibechat-server (2 CPU, 4 ГБ, 15 ГБ; интернет только Cursor, npm, Bun и GitHub)
-          и отключает вход по паролю с откатом через 5 минут, если приложение не подтвердит вход своим ключом.
+          **Несовместимое изменение: приложение больше ничего не запускает на компьютере.** Агент, проекты и превью работают на
+          вашем сервере (Debian 13 x86_64). При запуске — выбор: «Подключить сервер» или «Настроить новый сервер» (мастер). Если
+          сервер сохранён, приложение подключается само и сразу открывает Studio сервера. Старые локальные проекты остаются в
+          `~/VibeChat`, приложение их больше не открывает.
 
-          **Settings → Server help / Справка по серверу:** signing in as root with your own SSH key once password login is
-          off, and backups of `/var/lib/vibechat` to S3 with restic.
-
-          **Fixed: `SHA256SUMS`.** In v0.1.6 the macOS installer was listed as `BuildY VibeChat.dmg` while the asset is
-          `BuildY.VibeChat.dmg`, so `sha256sum -c` failed for it. The asset is now `BuildY-VibeChat.dmg`, and the release
-          checks that the names in `SHA256SUMS` and the assets match both ways and that `sha256sum -c` passes before and
-          after publishing.
-
-          **Not verified on a real VPS yet** (the wizard is tested end to end in CI on a Debian 13 Incus VM only):
-          provider images and cloud-init setups; hosts where ssh is socket-activated; IPv6-only hosts (IPv6 is off on
-          the container network); CDN addresses drifting over days (the allowlist is by IP, so another site on the same CDN
-          address is reachable too); real Cursor agent traffic through the allowlist (only `api2.cursor.sh` was checked;
-          wildcard subdomains are not covered); DNS through the host's resolver as a possible small leak channel; `apt` in
-          the container is blocked after setup (server updates come from GitHub releases); the wizard with the macOS and
-          Windows keychains and the card in the installed app. A second run after the lockdown cannot sign in with the
-          password (by design): use your own root key or the provider's web console. Please report problems.
-
-          Also still not verified on a real Mac: the per-port previews on macOS (`VIBECHAT_PREVIEW_PORTS=0` turns them off).
-
-          ## Server mode over SSH / Режим сервера по SSH
-
-          Settings → Server connects the app to a vibechat-server over SSH built into the app (no `ssh` binary): the app's
-          ed25519 key and the host token stay in the OS keychain, the host key is pinned on the first connect, previews are
-          forwarded, the Cursor key is stored on the server.
+          Not verified yet: the start screen and the reconnect on a real Mac, Windows and Linux desktop with a real VPS (CI
+          runs the connection and the wizard against Debian 13 Incus VMs only); the setup wizard on real providers (images,
+          cloud-init, socket-activated ssh, IPv6-only hosts); per-port previews on a real Mac (`VIBECHAT_PREVIEW_PORTS=0`
+          turns them off). Please report problems.
 
           `SHA256SUMS` lists the SHA-256 of every asset (the server's self-update checks the `.deb` against it).
 
-          Portable builds (unzip and run; the agent runtime `bridge/` sits next to the executable):
+          Desktop app (unzip and run, or the installers below):
 
           | System | Download | Requirements |
           |---|---|---|
@@ -319,46 +294,21 @@ jobs:
           | Windows x64 | [vibechat-desktop-windows-x64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-windows-x64.zip) | Windows 10/11 x64 with Microsoft Edge WebView2 (the installer adds it if missing) |
           | macOS Apple Silicon | [vibechat-desktop-macos-arm64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-macos-arm64.zip) | macOS 12+ on M1 or newer |
 
-          x64 builds run on any x86-64 CPU with SSE4.2 (no AVX/AVX2 needed): the agent runtime is compiled on the Bun
-          *baseline* runtime and checked in CI under QEMU `-cpu Nehalem-v2`.
+          Installers: `.deb` (Linux), `vibechat-amd64-installer.exe` (Windows), `BuildY-VibeChat.dmg` (macOS).
 
-          Installers are attached too: `.deb` (Linux), `vibechat-amd64-installer.exe` (Windows), `BuildY-VibeChat.dmg` (macOS).
-
-          Server (preview; requires Debian 13 "trixie" x86_64, Ubuntu and other systems are not supported for now; one
-          Incus container per user):
+          Server (required; Debian 13 "trixie" x86_64, Ubuntu and other systems are not supported for now):
           [vibechat-server-linux-amd64.deb](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-server-linux-amd64.deb)
-          — the agent host on 127.0.0.1 only (reach it through SSH), host token, Cursor key in a 0600 file on the server,
-          daily self-update from these releases (`vibechat-update.timer`, checked against `SHA256SUMS`). The desktop
-          app connects to it over SSH built into the app: Settings → Server.
+          — the agent host on 127.0.0.1 only (reached through SSH), host token, Cursor key in a 0600 file on the server, the
+          agent in the Cursor SDK sandbox (Landlock + bubblewrap), daily self-update from these releases
+          (`vibechat-update.timer`, checked against `SHA256SUMS`). The setup wizard installs it for you. The server's x64
+          agent runtime runs on any x86-64 CPU with SSE4.2 (no AVX/AVX2 needed).
+
+          The Cursor key is an API key of type **Cursor** (`grok_…`) from https://grok.com/dashboard/api-keys ("Grok API"
+          `xai-…` keys do not work); enter it in the server's Studio Settings.
 
           Builds are **not signed or notarized**.
           - macOS: after unzipping, run `xattr -dr com.apple.quarantine "BuildY VibeChat.app"` (or right-click → Open).
           - Windows: SmartScreen may warn — «More info» → «Run anyway».
-
-          Projects need [Bun](https://bun.sh) 1.3.3 or newer on PATH (`bun upgrade`). Then `vibechat --set-key` (paste the Cursor
-          API key, kept in the OS keychain) or set it in Settings.
-          The key is an API key of type **Cursor** (`grok_…`) from https://grok.com/dashboard/api-keys ("Grok API" `xai-…`
-          keys do not work). `vibechat --check-key > check.txt` checks it with Cursor and writes a diagnostic without the key.
-
-          ## Windows: no sandbox / Windows: без песочницы
-
-          Local mode (the agent on this computer) is unchanged. On Windows the local agent runs **without a sandbox** (cursor-sdk-bridge has
-          no filesystem sandbox on win32; its helper is a network proxy only), and the app shows a warning:
-          - arbitrary shell commands with your user's rights **and network access** (the curl/wget blocklist is easy to
-            get around: PowerShell `iwr`, `bun -e fetch`, `git clone`, `npm i`);
-          - shell commands can write and read **outside the project** (hooks check file tools and the shell's working
-            directory only);
-          - **no approval** step (without the sandbox the SDK approves every action);
-          - the Cursor key is in the bridge's environment and **likely visible to the agent's shell**.
-
-          Open only trusted projects on Windows. macOS (Seatbelt) and Linux (Landlock + bubblewrap) run the agent in the
-          SDK sandbox: writes only in the project, no network, fail closed.
-
-          On Windows prefer server mode (above): the agent then runs in the SDK sandbox on your Debian 13 server, set up by
-          the wizard (Settings → Set up a new server).
-
-          В Windows локальный агент работает без песочницы: открывайте только доверенные проекты или используйте режим
-          сервера (агент в песочнице на вашем сервере Debian 13).
 
           Log for bug reports: Windows `%APPDATA%\tw.buildy.vibechat\logs\vibechat.log`, macOS
           `~/Library/Application Support/tw.buildy.vibechat/logs/vibechat.log`, Linux `~/.config/tw.buildy.vibechat/logs/vibechat.log`.

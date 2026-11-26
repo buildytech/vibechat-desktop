@@ -2,7 +2,7 @@
 # CI: the desktop app's server connection end to end against the Debian 13 VM of ci-server-debian.sh (vibechat-server
 # installed and running there). In the VM: sshd and the tunnel user, made with the same lines the Studio shows in
 # Settings (apps/studio/src/desktop-connection.ts tunnelSetupCommand); a fresh host token. On the runner: a fresh
-# SSH key and `go test -tags e2e -run TestE2E ./internal/remote` through SSH to the VM. The token and the private key
+# SSH key and `go test -tags e2e -run TestE2E ./desktop/internal/remote` through SSH to the VM. The token and the private key
 # stay in 0600 temp files and are never printed.
 # Usage: ci-remote-e2e.sh <incus vm>
 set -euo pipefail
@@ -40,5 +40,5 @@ if ssh -i "$work/id" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
 	exit 1
 fi
 VIBECHAT_E2E_SSH="$ip:22" VIBECHAT_E2E_SSH_KEY="$work/id" VIBECHAT_E2E_TOKEN_FILE="$work/token" VIBECHAT_E2E_HOST_FP="$fp" \
-	go test -tags e2e -count=1 -run TestE2E -v ./internal/remote
+	go test -tags e2e -count=1 -run TestE2E -v ./desktop/internal/remote
 echo "ci-remote-e2e: ok"

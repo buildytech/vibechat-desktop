@@ -6,7 +6,7 @@ version: "${VIBECHAT_VERSION}"
 section: "web"
 priority: "optional"
 maintainer: "BuildY"
-description: "BuildY VibeChat desktop: build web apps with a sandboxed Cursor agent; the Cursor key stays in the system keychain."
+description: "BuildY VibeChat desktop: a window to your own vibechat-server (Debian 13), where the Cursor agent runs."
 vendor: "BuildY"
 homepage: "https://github.com/buildytech/vibechat-desktop"
 license: "Apache-2.0"
@@ -19,10 +19,6 @@ contents:
     dst: "/usr/share/pixmaps/vibechat.png"
   - src: "./build/linux/vibechat.desktop"
     dst: "/usr/share/applications/vibechat.desktop"
-  # The agent runtime: cursor-sdk-bridge + the SDK sandbox helper (cmd/fetch-bridge, pinned in bridge.lock.json).
-  - src: "./bin/bridge"
-    dst: "/usr/lib/vibechat/bridge"
-    type: tree
 
 # GTK 4 + WebKitGTK 6.0 (Ubuntu 24.04+ / Debian 13+), as built in CI.
 depends:

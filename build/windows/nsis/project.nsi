@@ -93,12 +93,8 @@ Section
     
     !insertmacro wails.files
 
-    # The agent runtime next to the exe: cursor-sdk-bridge + the SDK sandbox helper (cmd/fetch-bridge).
-    !ifdef ARG_BRIDGE_DIR
-        SetOutPath "$INSTDIR\bridge"
-        File /r "${ARG_BRIDGE_DIR}\*.*"
-        SetOutPath $INSTDIR
-    !endif
+    # The app has no agent runtime since 0.2 (the agent runs on the server): drop the bridge of an older install.
+    RMDir /r "$INSTDIR\bridge"
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
