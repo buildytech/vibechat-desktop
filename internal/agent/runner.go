@@ -130,6 +130,9 @@ func (r *Runner) stateRoot() string { return filepath.Join(r.o.DataDir, "bridge-
 // SandboxError is nil when the agent may run (bridge + helper + preflight ok); the agent never runs otherwise.
 func (r *Runner) SandboxError() error { return r.sandbox }
 
+// Unsandboxed reports that agents run without the SDK sandbox (Windows, or the bridge refused it once).
+func (r *Runner) Unsandboxed() bool { return !r.sandboxed() }
+
 // HasKey reports whether a key is configured.
 func (r *Runner) HasKey() bool { k, _ := r.o.Keys.Key(); return k != "" }
 

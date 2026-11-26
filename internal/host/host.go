@@ -21,12 +21,16 @@ type Capabilities struct {
 	Worktrees    bool   `json:"worktrees"`
 	PreviewLocal bool   `json:"preview_local"`
 	AgentSandbox bool   `json:"agent_sandbox"`
-	Templates    bool   `json:"templates"`
+	// AgentUnsandboxed: the agent runs without the Cursor SDK sandbox (Windows); the Studio shows a warning.
+	AgentUnsandboxed bool `json:"agent_unsandboxed"`
+	Templates        bool `json:"templates"`
 }
 
 // Agent is what the host needs from the agent runtime (agent.Runner; a fake in tests).
 type Agent interface {
 	SandboxError() error
+	// Unsandboxed reports that agents run without the SDK sandbox (Windows: cursor-sdk-bridge has none on win32).
+	Unsandboxed() bool
 	HasKey() bool
 	Me(ctx context.Context) (agent.Account, error)
 	// CheckKey asks Cursor whether a key works before it is stored.
@@ -120,6 +124,7 @@ func (h *Host) Capabilities() Capabilities {
 	c.Worktrees = h.opts.WorktreesDir != "" && h.hasTool("git")
 	c.PreviewLocal = h.opts.Preview != nil && h.hasTool("bun")
 	c.AgentSandbox = h.opts.Agent != nil && h.opts.Agent.SandboxError() == nil
+	c.AgentUnsandboxed = c.AgentSandbox && h.opts.Agent.Unsandboxed()
 	return c
 }
 

@@ -38,6 +38,30 @@ https://grok.com/dashboard/api-keys; "Grok API" keys (`xai-…`) do not work. Cu
 with `unauthenticated: Invalid Service Token`, an unknown key of another shape with `Invalid User API Key`. `vibechat --version` prints the
 version. Releases are built by CI from a `v*` tag.
 
+## Windows: no sandbox / Windows: без песочницы
+
+**v0.1.5 freezes the local version.** On Windows the agent runs **without a sandbox**: cursor-sdk-bridge 1.2.0 (and
+@cursor/sdk 1.5.0) has no filesystem sandbox on win32, its Windows helper is a network proxy only. The app shows a
+warning (EN + RU) in every project. What that means on Windows:
+
+- the agent runs arbitrary shell commands with your user's rights, **with network access** (the hook's blocklist of
+  `curl`/`wget`/`ssh`/… is easy to get around, e.g. PowerShell `iwr`, `bun -e fetch`, `git clone`, `npm i`);
+- shell commands can **write and read outside the project** (the hooks check the file tools and the shell's working
+  directory, not what a command touches);
+- there is **no approval** step: without the sandbox the SDK approves every action automatically;
+- the Cursor key reaches the bridge through its environment and is **likely visible to the agent's shell**.
+
+Open only trusted projects on Windows. On **macOS** (Seatbelt) and **Linux** (Landlock + bubblewrap, seccomp) the
+agent runs inside the SDK sandbox: writes only in the project, no network, fail closed if the sandbox is missing.
+
+**Decision: next versions move the agent to the user's server** — one Incus container per user (Debian 13), the
+desktop app becomes a thin shell connected over built-in SSH (pinned host key, host token), and the Cursor key is
+stored on the server, never on the PC.
+
+Кратко по-русски: в Windows агент работает без песочницы (shell-команды с доступом вашего пользователя к файлам и
+сети, без подтверждений, ключ, вероятно, виден shell). Открывайте только доверенные проекты. Следующие версии
+переносят агента на ваш сервер: контейнер Incus на пользователя (Debian 13), встроенный SSH, ключ хранится на сервере.
+
 ## How it works
 
 - The window loads the built Studio (`apps/studio` `build:desktop`), embedded in the binary (`frontend/dist`, made by
@@ -63,7 +87,8 @@ version. Releases are built by CI from a `v*` tag.
   refuses a sandboxed local agent on win32 ("Local SDK sandboxing was requested, but sandboxing is not supported in
   this environment": its Windows helper is proxy-only, no filesystem isolation), so on Windows agents are created
   with `sandboxOptions.enabled=false` (logged at start); elsewhere that refusal is retried once without the sandbox
-  and logged. The permission hooks below and the workspace checks still apply.
+  and logged. The permission hooks below and the workspace checks still apply; see «Windows: no sandbox» above
+  for what that leaves open.
 - The bridge runs with a private `HOME` (`<data>/agent-home`) that holds the user-level `.cursor/sandbox.json`
   (`readBoundary: workspace`, `networkAccess: false`, plus the tool runtimes and `/proc` Bun needs) and
   `.cursor/hooks.json`: fail-closed `preToolUse` / `beforeReadFile` hooks that run this binary (`vibechat --hook`) and

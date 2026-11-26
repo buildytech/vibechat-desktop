@@ -57,6 +57,9 @@ func TestOtherErrorsAreNotRetriedWithoutSandbox(t *testing.T) {
 
 func TestWindowsStartsWithoutSandbox(t *testing.T) {
 	r := NewRunner(RunnerOptions{Located: errors.New("no bridge in this test")})
+	if r.Unsandboxed() != (runtime.GOOS == "windows") {
+		t.Fatalf("Unsandboxed %v on %s", r.Unsandboxed(), runtime.GOOS)
+	}
 	if want := runtime.GOOS != "windows"; r.sandboxed() != want {
 		t.Fatalf("sandboxed %v on %s", r.sandboxed(), runtime.GOOS)
 	}

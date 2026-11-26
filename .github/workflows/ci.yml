@@ -17,7 +17,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       # The app version: scripts/package.sh and the desktop build stamp it (internal/appid.Version); a v* tag wins.
-      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.1.0' }}
+      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.1.5' }}
     defaults:
       run:
         shell: bash
@@ -207,8 +207,25 @@ jobs:
           The key is an API key of type **Cursor** (`grok_…`) from https://grok.com/dashboard/api-keys ("Grok API" `xai-…`
           keys do not work). `vibechat --check-key > check.txt` checks it with Cursor and writes a diagnostic without the key.
 
-          On Windows agents run without the SDK sandbox (cursor-sdk-bridge has no filesystem sandbox on win32); the
-          permission hooks and workspace checks still apply.
+          ## Windows: no sandbox / Windows: без песочницы
+
+          This release freezes the local version. On Windows the agent runs **without a sandbox** (cursor-sdk-bridge has
+          no filesystem sandbox on win32; its helper is a network proxy only), and the app shows a warning:
+          - arbitrary shell commands with your user's rights **and network access** (the curl/wget blocklist is easy to
+            get around: PowerShell `iwr`, `bun -e fetch`, `git clone`, `npm i`);
+          - shell commands can write and read **outside the project** (hooks check file tools and the shell's working
+            directory only);
+          - **no approval** step (without the sandbox the SDK approves every action);
+          - the Cursor key is in the bridge's environment and **likely visible to the agent's shell**.
+
+          Open only trusted projects on Windows. macOS (Seatbelt) and Linux (Landlock + bubblewrap) run the agent in the
+          SDK sandbox: writes only in the project, no network, fail closed.
+
+          **Decision: next versions move the agent to the user's server**: one Incus container per user (Debian 13), the
+          desktop app as a thin shell over built-in SSH (pinned host key, host token), the Cursor key stored on the server.
+
+          В Windows агент работает без песочницы: открывайте только доверенные проекты. Следующие версии запускают агента
+          на вашем сервере (Incus, Debian 13), ключ хранится на сервере.
 
           Log for bug reports: Windows `%APPDATA%\tw.buildy.vibechat\logs\vibechat.log`, macOS
           `~/Library/Application Support/tw.buildy.vibechat/logs/vibechat.log`, Linux `~/.config/tw.buildy.vibechat/logs/vibechat.log`.

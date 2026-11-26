@@ -19,14 +19,17 @@ import (
 // fakeAgent stands in for agent.Runner: Send writes a file named by the prompt into the session folder and streams a
 // few contract events, so routes, worktrees and the merge back are tested without the bridge.
 type fakeAgent struct {
-	mu        sync.Mutex
-	sandbox   error
-	key       bool
-	cwds      []string
-	cancelled []string
+	mu      sync.Mutex
+	sandbox error
+	key     bool
+	// unsandboxed: agents run without the SDK sandbox (the Windows host).
+	unsandboxed bool
+	cwds        []string
+	cancelled   []string
 }
 
 func (f *fakeAgent) SandboxError() error { return f.sandbox }
+func (f *fakeAgent) Unsandboxed() bool   { return f.unsandboxed }
 func (f *fakeAgent) HasKey() bool        { return f.key }
 func (f *fakeAgent) Me(context.Context) (agent.Account, error) {
 	return agent.Account{APIKeyName: "test", UserEmail: "a@b.c"}, nil

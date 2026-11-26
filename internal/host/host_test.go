@@ -172,6 +172,18 @@ func TestSameClientMessageRunsOnce(t *testing.T) {
 	}
 }
 
+// Windows: the agent runs without the SDK sandbox, and the capabilities say so for the Studio's warning.
+func TestCapabilitiesReportAnUnsandboxedAgent(t *testing.T) {
+	e := newEnv(t, pinnedSeam(t), false)
+	if _, caps := call(t, e.host, "GET", "/host/capabilities", nil); caps["agent_unsandboxed"] != false || caps["agent_sandbox"] != true {
+		t.Fatalf("sandboxed host: %v", caps)
+	}
+	e.agent.unsandboxed = true
+	if _, caps := call(t, e.host, "GET", "/host/capabilities", nil); caps["agent_unsandboxed"] != true {
+		t.Fatalf("unsandboxed host: %v", caps)
+	}
+}
+
 func TestPromptFailsClosed(t *testing.T) {
 	e := newEnv(t, pinnedSeam(t), false)
 	pid := mustProject(t, e, "closed")["id"].(string)
