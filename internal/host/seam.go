@@ -10,12 +10,32 @@ import (
 	"strings"
 )
 
-// Seam is host-seam.json: the seam version, the URL prefix, the capability fields and every route the Studio calls.
+// Seam is host-seam.json: the seam version, the URL prefix, the capability fields, every route the Studio calls and
+// the remote-host part (vibechat-server): protocol versions, the Hello fields, the session constants and the routes
+// the desktop app itself calls (Remote).
 type Seam struct {
-	Seam         string      `json:"seam"`
-	Prefix       string      `json:"prefix"`
-	Capabilities []string    `json:"capabilities"`
-	Routes       []SeamRoute `json:"routes"`
+	Seam              string      `json:"seam"`
+	Prefix            string      `json:"prefix"`
+	Capabilities      []string    `json:"capabilities"`
+	Routes            []SeamRoute `json:"routes"`
+	Protocol          int         `json:"protocol"`
+	MinClientProtocol int         `json:"minClientProtocol"`
+	Hello             []string    `json:"hello"`
+	Auth              SeamAuth    `json:"auth"`
+	Remote            []SeamRoute `json:"remote"`
+}
+
+// SeamAuth are the session constants of the remote host (HOST_SESSION_PATH and friends).
+type SeamAuth struct {
+	SessionPath      string `json:"sessionPath"`
+	Cookie           string `json:"cookie"`
+	TicketParam      string `json:"ticketParam"`
+	TicketTTLSeconds int    `json:"ticketTtlSeconds"`
+}
+
+// all is Routes then Remote.
+func (s Seam) all() []SeamRoute {
+	return append(append([]SeamRoute{}, s.Routes...), s.Remote...)
 }
 
 // SeamRoute is one method + Express-style path (":id" segments are parameters).
@@ -61,7 +81,7 @@ func NewRouter(seam Seam) *Router {
 // Handle registers h for "METHOD /path"; it panics when the route is not in the seam (a host must not invent routes
 // the Studio does not know; add them to buildytech/studio first).
 func (rt *Router) Handle(key string, h HandlerFunc) {
-	for _, r := range rt.seam.Routes {
+	for _, r := range rt.seam.all() {
 		if r.Key() == key {
 			rt.handlers[key] = h
 			return
@@ -73,7 +93,7 @@ func (rt *Router) Handle(key string, h HandlerFunc) {
 // Missing lists seam routes that have no handler.
 func (rt *Router) Missing() []string {
 	var out []string
-	for _, r := range rt.seam.Routes {
+	for _, r := range rt.seam.all() {
 		if _, ok := rt.handlers[r.Key()]; !ok {
 			out = append(out, r.Key())
 		}
@@ -88,7 +108,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rel = "/"
 	}
 	pathMatched := false
-	for _, route := range rt.seam.Routes {
+	for _, route := range rt.seam.all() {
 		p, ok := match(route.Path, rel)
 		if !ok {
 			continue

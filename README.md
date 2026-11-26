@@ -133,15 +133,46 @@ bin/vibechat --set-key                       # paste the Cursor key on stdin, ke
 bin/vibechat
 ```
 
-Headless mode for tests and the exam (no window; loopback only, port `VIBECHAT_PORT`, default 18120):
+Headless Wails mode for tests and the exam (no window, no auth; loopback only, port `VIBECHAT_PORT`, default 18120):
 
 ```bash
-go build -tags server -o bin/vibechat-server ./cmd/vibechat
-bin/vibechat-server
+go build -tags server -o bin/vibechat-headless ./cmd/vibechat
+bin/vibechat-headless
 curl -s http://127.0.0.1:18120/runtime/v1/host/capabilities
 ```
 
-The server build has no auth: never expose it beyond loopback.
+The headless build has no auth: never expose it beyond loopback. It stays until the tests and the exam move to
+`vibechat-server`.
+
+## Server (preview) / Сервер (предварительно)
+
+`cmd/vibechat-server` is the same host on the user's own server (Debian 13, one Incus container per user): plain
+`net/http`, no Wails. The desktop app does not connect to it yet (next steps: SSH tunnel, setup wizard).
+
+- `127.0.0.1:18120`: the host seam `/runtime/v1/*` and the Studio; `127.0.0.1:18121`: the preview gateway,
+  `http://<projectId>.preview.localhost:18121/` (one port for every preview; grants and cookies as in the app).
+  Loopback only: the app reaches both through SSH, and any other `Host` header gets 421.
+- Auth: `vibechat-server token new` prints a host token once (32 random bytes) and keeps only its sha256
+  (`/var/lib/vibechat/auth/token.sha256`, 0600). The app's Go side sends it as `Authorization: Bearer`, buys a
+  one-time ticket (`POST /runtime/v1/auth/ticket`, 60 s) and opens `/auth/session?ticket=…` in the window, which sets
+  an HttpOnly SameSite=Strict cookie. `GET /runtime/v1/host/hello` (seam, server version, instance id, protocol,
+  preview port, capabilities) is the only public route. The desktop app's own host has no auth and answers the ticket
+  route with 404.
+- The Cursor key: `/var/lib/vibechat/secrets/cursor-key` (0600; a looser file is refused), set in Settings or with
+  `vibechat-server set-key` (stdin).
+- `vibechat-server doctor`: bridge + `cursorsandbox --preflight-only`, Landlock, user namespaces, token, key, bun, git.
+- Package: `bash scripts/package-server.sh` → `dist/vibechat-server-linux-amd64.deb` (`/usr/lib/vibechat-server`,
+  system user `vibechat`, `vibechat-server.service`, `vibechat-update.timer`). The timer runs
+  `vibechat-server update` daily: the newest GitHub release, if newer, checked against its `SHA256SUMS`, then
+  `dpkg -i` (integrity, not origin: release signing comes later).
+
+```bash
+sudo dpkg -i vibechat-server-linux-amd64.deb
+sudo -u vibechat vibechat-server token new     # copy the token (shown once)
+sudo -u vibechat vibechat-server set-key       # or later in Settings
+sudo systemctl start vibechat-server
+ssh -L 18120:127.0.0.1:18120 -L 18121:127.0.0.1:18121 you@server   # until the app does it
+```
 
 The agent needs the runtime next to the binary: `go run ./cmd/fetch-bridge -out bin/bridge` downloads the
 cursor-sdk-bridge build and the SDK sandbox helper pinned in `bridge.lock.json` and verifies their SHA-256 / sha512.

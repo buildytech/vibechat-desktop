@@ -1,0 +1,10 @@
+# Installs the newest official release (GitHub releases of buildytech/vibechat-desktop, sha256 checked) when it is
+# newer than the installed one; the package's postinstall restarts the server.
+[Unit]
+Description=Update the BuildY VibeChat server from official releases
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/vibechat-server update

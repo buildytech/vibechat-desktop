@@ -1,0 +1,43 @@
+# Linux .deb of the VibeChat server (scripts/package-server.sh: wails3 tool package -format deb, i.e. nfpm).
+# One user per server (one Incus container per user, Debian 13): the host listens on 127.0.0.1 only; the desktop
+# app reaches it through SSH. Data: /var/lib/vibechat (user vibechat, 0700).
+name: "vibechat-server"
+arch: ${GOARCH}
+platform: "linux"
+version: "${VIBECHAT_VERSION}"
+section: "web"
+priority: "optional"
+maintainer: "BuildY"
+description: "BuildY VibeChat server: the agent host (sandboxed Cursor agent, Studio, previews) on your own server, loopback only."
+vendor: "BuildY"
+homepage: "https://github.com/buildytech/vibechat-desktop"
+license: "Apache-2.0"
+release: "1"
+
+contents:
+  # The binary and the agent runtime next to it (bridge.Locate: <exe dir>/bridge; /usr/bin is a symlink).
+  - src: "./bin/server/vibechat-server"
+    dst: "/usr/lib/vibechat-server/vibechat-server"
+  - src: "./bin/bridge"
+    dst: "/usr/lib/vibechat-server/bridge"
+    type: tree
+  - src: "/usr/lib/vibechat-server/vibechat-server"
+    dst: "/usr/bin/vibechat-server"
+    type: symlink
+  - src: "./build/linux/server/vibechat-server.service"
+    dst: "/usr/lib/systemd/system/vibechat-server.service"
+  - src: "./build/linux/server/vibechat-update.service"
+    dst: "/usr/lib/systemd/system/vibechat-update.service"
+  - src: "./build/linux/server/vibechat-update.timer"
+    dst: "/usr/lib/systemd/system/vibechat-update.timer"
+
+depends:
+  - adduser
+  - ca-certificates
+  - git
+recommends:
+  - bubblewrap
+
+scripts:
+  postinstall: "./build/linux/server/postinstall.sh"
+  preremove: "./build/linux/server/preremove.sh"

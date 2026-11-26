@@ -12,6 +12,11 @@
 //
 // Every other request (another site in the browser, DNS rebinding with a foreign Host) gets 403. The proxy speaks
 // WebSocket (Vite HMR: the dev server's HMR client port is the proxy port).
+//
+// Gateway mode (vibechat-server, NewGateway): no port per project; one listener on the gateway port routes by Host,
+// `<projectId>.preview.localhost:<port>` (project ids are hex, valid DNS labels; *.localhost resolves to loopback
+// without DNS), so one tunnel port carries every preview. Grants, cookies and the same-origin rule are unchanged; the
+// HMR client port is the gateway port.
 package preview
 
 import (
@@ -52,8 +57,60 @@ type Manager struct {
 	// environ is the base environment of dev servers (os.Environ without CURSOR_API_KEY).
 	environ []string
 
+	// gatewayPort > 0: gateway mode (one Host-routed listener, see Gateway).
+	gatewayPort int
+
 	mu       sync.Mutex
 	projects map[string]*server
+}
+
+// GatewayDomain is the host suffix of gateway previews.
+const GatewayDomain = ".preview.localhost"
+
+// NewGateway is a Manager in gateway mode: previews are http://<projectId>.preview.localhost:<port>/ and Gateway
+// serves them; the caller listens on 127.0.0.1:<port>.
+func NewGateway(log func(string), port int) *Manager {
+	m := New(log)
+	m.gatewayPort = port
+	return m
+}
+
+// Gateway routes a request to the preview its Host names (gateway mode); unknown or stopped projects get 404.
+func (m *Manager) Gateway() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := m.gatewayID(r.Host)
+		var s *server
+		if ok {
+			m.mu.Lock()
+			s = m.projects[id]
+			m.mu.Unlock()
+		}
+		if s == nil {
+			w.Header().Set("content-type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(notRunningPage))
+			return
+		}
+		s.handle.ServeHTTP(w, r)
+	})
+}
+
+// gatewayID is the project id of "<id>.preview.localhost:<gatewayPort>".
+func (m *Manager) gatewayID(hostport string) (string, bool) {
+	h, port, err := net.SplitHostPort(hostport)
+	if err != nil || port != strconv.Itoa(m.gatewayPort) {
+		return "", false
+	}
+	id, ok := strings.CutSuffix(strings.ToLower(h), GatewayDomain)
+	if !ok || id == "" || len(id) > 63 {
+		return "", false
+	}
+	for _, c := range id {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return "", false
+		}
+	}
+	return id, true
 }
 
 // New returns a Manager. log may be nil.
@@ -77,9 +134,10 @@ type server struct {
 	cmd      *exec.Cmd
 	done     chan struct{}
 	devPort  int
-	ln       net.Listener
-	http     *http.Server
-	origin   string // http://127.0.0.1:<proxy port>
+	ln       net.Listener // nil in gateway mode
+	http     *http.Server // nil in gateway mode
+	handle   http.Handler
+	origin   string // http://127.0.0.1:<proxy port>, or http://<id>.preview.localhost:<gateway port>
 	session  string // cookie value
 	out      *tailBuffer
 	mu       sync.Mutex
@@ -145,11 +203,21 @@ func (m *Manager) Ensure(id, dir string, p templates.Profile) (host.PreviewStatu
 	if err != nil {
 		return host.PreviewStatus{}, err
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return host.PreviewStatus{}, err
+	var ln net.Listener
+	proxyPort := m.gatewayPort
+	origin := "http://" + id + GatewayDomain + ":" + strconv.Itoa(proxyPort)
+	if m.gatewayPort == 0 {
+		if ln, err = net.Listen("tcp", "127.0.0.1:0"); err != nil {
+			return host.PreviewStatus{}, err
+		}
+		proxyPort = ln.Addr().(*net.TCPAddr).Port
+		origin = "http://127.0.0.1:" + strconv.Itoa(proxyPort)
 	}
-	proxyPort := ln.Addr().(*net.TCPAddr).Port
+	closeLn := func() {
+		if ln != nil {
+			ln.Close()
+		}
+	}
 	argv := templates.Expand(p.Dev, devPort, proxyPort)
 	cmd := procgroup.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir
@@ -162,17 +230,20 @@ func (m *Manager) Ensure(id, dir string, p templates.Profile) (host.PreviewStatu
 	cmd.Stdout, cmd.Stderr = out, out
 	procgroup.Prepare(cmd)
 	if err := cmd.Start(); err != nil {
-		ln.Close()
+		closeLn()
 		return host.PreviewStatus{}, fmt.Errorf("start %s: %v", argv[0], err)
 	}
 	procgroup.Attach(cmd)
 	s := &server{
 		id: id, cmd: cmd, done: make(chan struct{}), devPort: devPort, ln: ln, out: out,
-		origin: "http://127.0.0.1:" + strconv.Itoa(proxyPort), session: randomHex(24), status: "starting",
+		origin: origin, session: randomHex(24), status: "starting",
 		grants: map[string]time.Time{},
 	}
-	s.http = &http.Server{Handler: s.handler(), ReadHeaderTimeout: 30 * time.Second}
-	go func() { _ = s.http.Serve(ln) }()
+	s.handle = s.handler()
+	if ln != nil {
+		s.http = &http.Server{Handler: s.handle, ReadHeaderTimeout: 30 * time.Second}
+		go func() { _ = s.http.Serve(ln) }()
+	}
 	go func() {
 		err := cmd.Wait()
 		s.mu.Lock()
@@ -255,6 +326,9 @@ func (m *Manager) stopLocked(id string) {
 	s.stopping = true
 	s.mu.Unlock()
 	procgroup.Stop(s.cmd, s.done, 5*time.Second)
+	if s.http == nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	_ = s.http.Shutdown(ctx)
 	cancel()
@@ -294,6 +368,9 @@ func (s *server) takeGrant(tok string) bool {
 
 func (s *server) hostAllowed(h string) bool {
 	u, _ := url.Parse(s.origin)
+	if strings.HasSuffix(u.Hostname(), GatewayDomain) {
+		return strings.EqualFold(h, u.Host)
+	}
 	port := u.Port()
 	return h == "127.0.0.1:"+port || h == "localhost:"+port || h == "[::1]:"+port
 }
@@ -327,6 +404,11 @@ const deniedPage = `<!doctype html><meta charset="utf-8"><title>Preview locked</
 <body style="font:16px system-ui;padding:32px;background:#111;color:#eee">
 <h1 style="font-size:20px">This preview link has expired</h1>
 <p>Open the preview again from VibeChat (Preview → Play, or “Open in new tab”).</p></body>`
+
+const notRunningPage = `<!doctype html><meta charset="utf-8"><title>No preview</title>
+<body style="font:16px system-ui;padding:32px;background:#111;color:#eee">
+<h1 style="font-size:20px">This preview is not running</h1>
+<p>Start it from VibeChat (Preview → Play).</p></body>`
 
 func (s *server) handler() http.Handler {
 	target, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(s.devPort))

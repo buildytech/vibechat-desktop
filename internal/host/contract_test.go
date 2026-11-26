@@ -24,7 +24,7 @@ func pinnedSeam(t *testing.T) Seam {
 func TestHostSeamContract(t *testing.T) {
 	s := pinnedSeam(t)
 	h := testHost(t, s)
-	for _, r := range s.Routes {
+	for _, r := range append(append([]SeamRoute{}, s.Routes...), s.Remote...) {
 		r := r
 		t.Run(r.Key(), func(t *testing.T) {
 			if r.SSE {
@@ -87,5 +87,40 @@ func TestMiddlewareSplitsSeamFromStudio(t *testing.T) {
 		if rec.Body.String() != want {
 			t.Errorf("%s → %q", path, rec.Body.String())
 		}
+	}
+}
+
+func TestHelloCarriesEverySeamField(t *testing.T) {
+	s := pinnedSeam(t)
+	if s.Protocol < 1 || s.MinClientProtocol < 1 || len(s.Remote) == 0 || s.Auth.SessionPath == "" {
+		t.Fatalf("pinned seam has no remote part: %+v", s)
+	}
+	h := testHost(t, s)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, s.Prefix+"/host/hello", nil))
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != 200 {
+		t.Fatalf("%d %v", rec.Code, err)
+	}
+	for _, f := range s.Hello {
+		if f == "previewPort" { // optional: only a host with a preview gateway has one
+			continue
+		}
+		if _, ok := got[f]; !ok {
+			t.Errorf("hello misses %q", f)
+		}
+	}
+	if got["protocol"] != float64(s.Protocol) {
+		t.Errorf("protocol %v", got["protocol"])
+	}
+}
+
+func TestTicketIsOffInTheDesktopApp(t *testing.T) {
+	s := pinnedSeam(t)
+	h := testHost(t, s)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, s.Prefix+"/auth/ticket", nil))
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "error") {
+		t.Fatalf("%d %q", rec.Code, rec.Body.String())
 	}
 }

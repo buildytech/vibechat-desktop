@@ -64,8 +64,12 @@ jobs:
           d="$RUNNER_TEMP/Профиль пользователя/VibeChat 144"
           mkdir -p "$d"
           VIBECHAT_E2E_INSTALL=1 VIBECHAT_E2E_DIR="$d" go test -count=1 -v -run TestTemplatesInstallE2E .
-      - name: Headless build (server tag)
-        run: go build -tags server -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat-server ./cmd/vibechat
+      # The old headless Wails build (no auth, loopback): kept for local tests and the exam until they move to
+      # cmd/vibechat-server.
+      - name: Headless build (Wails, server tag)
+        run: go build -tags server -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat-headless ./cmd/vibechat
+      - name: Server build (cmd/vibechat-server, net/http)
+        run: go build -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat-server-check ./cmd/vibechat-server
       - name: Desktop build
         run: go build -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat ./cmd/vibechat
       - name: Packaging tools (wails3 CLI of the pinned Wails; NSIS on Windows)
@@ -81,6 +85,37 @@ jobs:
           export VIBECHAT_VERSION="${VIBECHAT_VERSION#v}"
           bash scripts/package.sh
           ls dist/vibechat-desktop-*.zip
+      # The server .deb (Linux): /usr/lib/vibechat-server + systemd units (vibechat-server, vibechat-update.timer).
+      - name: Server package (scripts/package-server.sh, Linux)
+        if: runner.os == 'Linux'
+        run: |
+          export VIBECHAT_VERSION="${VIBECHAT_VERSION#v}"
+          bash scripts/package-server.sh
+      # Install the .deb on the runner like a server: system user, units, host token, then the auth flow over
+      # loopback (hello public; Bearer → one-time ticket → HttpOnly session cookie; no auth → 401) and the doctor.
+      - name: Server package install smoke (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo dpkg -i dist/vibechat-server-linux-amd64.deb
+          systemctl is-enabled vibechat-update.timer vibechat-server.service
+          sudo -u vibechat env VIBECHAT_DATA_DIR=/var/lib/vibechat vibechat-server token new 2>/dev/null | tee "$RUNNER_TEMP/tok" >/dev/null
+          sudo stat -c '%a %U' /var/lib/vibechat /var/lib/vibechat/auth/token.sha256
+          sudo systemctl start vibechat-server.service
+          for _ in $(seq 1 50); do curl -fsS http://127.0.0.1:18120/runtime/v1/host/hello > hello.json 2>/dev/null && break; sleep 0.2; done
+          cat hello.json; echo
+          grep -q '"protocol":1' hello.json
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18120/runtime/v1/projects)" = 401
+          ticket=$(curl -fsS -X POST -H "Authorization: Bearer $(cat "$RUNNER_TEMP/tok")" http://127.0.0.1:18120/runtime/v1/auth/ticket | jq -r .ticket)
+          curl -fsS -c jar -o /dev/null "http://127.0.0.1:18120/auth/session?ticket=$ticket"
+          grep -q '#HttpOnly_127.0.0.1.*vibechat_session' jar
+          curl -fsS -b jar http://127.0.0.1:18120/runtime/v1/host/capabilities; echo
+          curl -fsS -b jar http://127.0.0.1:18120/ | grep -qi '<html\|<!doctype'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: x.preview.localhost:18121' http://127.0.0.1:18121/)" = 404
+          rm -f "$RUNNER_TEMP/tok" jar
+          # GitHub runners lack Landlock: the doctor reports the sandbox and the server keeps the agent off.
+          sudo -u vibechat env VIBECHAT_DATA_DIR=/var/lib/vibechat vibechat-server doctor || echo "::warning::vibechat-server doctor reported FAIL (expected on GitHub runners without Landlock)"
+          vibechat-server update --check || true
+          sudo journalctl -u vibechat-server --no-pager | tail -20
       # Agent runtime smoke from the shipped zip: unpack under a path with spaces and Cyrillic, run the app's own
       # --bridge-smoke (locate bridge next to the exe, sandbox preflight, private HOME/USERPROFILE, ready + Ping).
       - name: Bridge smoke from the portable zip
@@ -198,6 +233,12 @@ jobs:
 
           Installers are attached too: `.deb` (Linux), `vibechat-amd64-installer.exe` (Windows), `.dmg` (macOS).
 
+          Server (preview, Debian 13 / one Incus container per user):
+          [vibechat-server-linux-amd64.deb](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-server-linux-amd64.deb)
+          — the agent host on 127.0.0.1 only (reach it through SSH), host token, Cursor key in a 0600 file on the server,
+          daily self-update from these releases (`vibechat-update.timer`, checked against `SHA256SUMS`). The desktop
+          app does not connect to it yet.
+
           Builds are **not signed or notarized**.
           - macOS: after unzipping, run `xattr -dr com.apple.quarantine "BuildY VibeChat.app"` (or right-click → Open).
           - Windows: SmartScreen may warn — «More info» → «Run anyway».
@@ -230,6 +271,13 @@ jobs:
           Log for bug reports: Windows `%APPDATA%\tw.buildy.vibechat\logs\vibechat.log`, macOS
           `~/Library/Application Support/tw.buildy.vibechat/logs/vibechat.log`, Linux `~/.config/tw.buildy.vibechat/logs/vibechat.log`.
           EOF
+      # SHA256SUMS of every asset: vibechat-server update checks the server .deb against it before dpkg -i.
+      - name: SHA256SUMS
+        run: |
+          cd dist
+          sha256sum -- vibechat-desktop-linux-x64.zip vibechat-desktop-windows-x64.zip vibechat-desktop-macos-arm64.zip \
+            *.deb vibechat-amd64-installer.exe "BuildY VibeChat.dmg" > SHA256SUMS
+          cat SHA256SUMS
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -238,4 +286,4 @@ jobs:
           ls -l dist
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "BuildY VibeChat $GITHUB_REF_NAME" --notes-file notes.md \
             dist/vibechat-desktop-linux-x64.zip dist/vibechat-desktop-windows-x64.zip dist/vibechat-desktop-macos-arm64.zip \
-            dist/*.deb dist/vibechat-amd64-installer.exe "dist/BuildY VibeChat.dmg"
+            dist/*.deb dist/vibechat-amd64-installer.exe "dist/BuildY VibeChat.dmg" dist/SHA256SUMS

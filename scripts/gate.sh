@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local gate before a push to main (no --force, no --no-verify): formatting, vet, the unit and host-seam contract tests,
-# the submodule pin, and the headless (server) build. The GUI build and installers run in CI on all three systems.
+# the submodule pin, the headless Wails build and the server (cmd/vibechat-server). The GUI build and installers run in CI on all three systems.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 [ "$(git branch --show-current)" = "main" ] || { echo "gate: branch must be main" >&2; exit 1; }
@@ -15,5 +15,7 @@ go vet $PKGS
 go test -count=1 $PKGS
 passed="$(go test -count=1 -run TestHostSeamContract -v ./internal/host | grep -c -- '--- \(PASS\|SKIP\): TestHostSeamContract/')"
 echo "gate: host seam contract cases: $passed"
-go build -tags server -o bin/vibechat-server ./cmd/vibechat
+go build -tags server -o bin/vibechat-headless ./cmd/vibechat
+go build -o bin/vibechat-server ./cmd/vibechat-server
+GOOS=windows go vet ./cmd/vibechat-server ./internal/auth ./internal/privfile ./internal/hostwire
 echo "gate: ok (studio $(git -C third_party/studio rev-parse --short HEAD), templates $(git -C third_party/templates rev-parse --short HEAD))"

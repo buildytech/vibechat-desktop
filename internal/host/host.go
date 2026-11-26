@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/buildytech/vibechat-desktop/internal/agent"
 	"github.com/buildytech/vibechat-desktop/internal/store"
@@ -69,6 +70,30 @@ type Options struct {
 	LookPath func(string) (string, error)
 	// Log receives host diagnostics (never keys).
 	Log func(string)
+
+	// InstanceID is the stable id of this install in GET /host/hello ("" in the desktop app: it answers with "local").
+	InstanceID string
+	// PreviewPort is the preview gateway's port in hello (vibechat-server; 0 = per-project ports, the desktop app).
+	PreviewPort int
+	// Tickets mints window sign-in tickets (vibechat-server's auth.TokenAuth); nil = no auth (the in-process Wails
+	// host), and POST /auth/ticket answers 404.
+	Tickets TicketIssuer
+}
+
+// TicketIssuer is auth.TokenAuth's ticket side.
+type TicketIssuer interface {
+	IssueTicket(r *http.Request) (string, time.Time, error)
+}
+
+// Hello is HostHello of the seam (studio packages/agent-contract/src/host.ts).
+type Hello struct {
+	Seam              string       `json:"seam"`
+	ServerVersion     string       `json:"serverVersion"`
+	InstanceID        string       `json:"instanceId"`
+	Protocol          int          `json:"protocol"`
+	MinClientProtocol int          `json:"minClientProtocol"`
+	PreviewPort       int          `json:"previewPort,omitempty"`
+	Capabilities      Capabilities `json:"capabilities"`
 }
 
 // Host is the seam of one desktop app.
@@ -91,6 +116,8 @@ func New(opts Options) *Host {
 	}
 	h := &Host{opts: opts, router: NewRouter(opts.Seam), bus: NewBus(), runs: map[string]*activeRun{}, setup: map[string]*projectSetup{}}
 	h.router.Handle("GET /host/capabilities", h.capabilities)
+	h.router.Handle("GET /host/hello", h.hello)
+	h.router.Handle("POST /auth/ticket", h.ticket)
 	if opts.Store == nil {
 		return h
 	}
@@ -126,6 +153,36 @@ func (h *Host) Capabilities() Capabilities {
 	c.AgentSandbox = h.opts.Agent != nil && h.opts.Agent.SandboxError() == nil
 	c.AgentUnsandboxed = c.AgentSandbox && h.opts.Agent.Unsandboxed()
 	return c
+}
+
+// Hello answers who this host is and which app protocol it serves.
+func (h *Host) Hello() Hello {
+	id := h.opts.InstanceID
+	if id == "" {
+		id = "local-desktop-app"
+	}
+	return Hello{
+		Seam: h.opts.Seam.Seam, ServerVersion: h.opts.Version, InstanceID: id,
+		Protocol: h.opts.Seam.Protocol, MinClientProtocol: h.opts.Seam.MinClientProtocol,
+		PreviewPort: h.opts.PreviewPort, Capabilities: h.Capabilities(),
+	}
+}
+
+func (h *Host) hello(w http.ResponseWriter, _ *http.Request, _ Params) {
+	WriteJSON(w, http.StatusOK, h.Hello())
+}
+
+func (h *Host) ticket(w http.ResponseWriter, r *http.Request, _ Params) {
+	if h.opts.Tickets == nil {
+		WriteError(w, http.StatusNotFound, "Sign-in is off: this is the desktop app's own host")
+		return
+	}
+	t, exp, err := h.opts.Tickets.IssueTicket(r)
+	if err != nil {
+		WriteError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]string{"ticket": t, "expiresAt": exp.UTC().Format(time.RFC3339)})
 }
 
 func (h *Host) capabilities(w http.ResponseWriter, _ *http.Request, _ Params) {
