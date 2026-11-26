@@ -315,7 +315,7 @@ func TestScriptsSayWhatTheArchitectureSays(t *testing.T) {
 		"listen=tcp:127.0.0.1:18120 connect=tcp:127.0.0.1:18120 bind=host", "listen=tcp:127.0.0.1:18121 connect=tcp:127.0.0.1:18121 bind=host",
 		"images:debian/13", "ipv6.address=none", "security.privileged")
 	has("server:apply", "sha256sum -c --strict --quiet want", BunSHA256, "apt-get install -y -qq --reinstall /root/vibechat-server.deb")
-	has("egress:apply", "security.acls.default.egress.action=reject", `destination_port: "443"`, "registry.npmjs.org", "api2.cursor.sh", "bun.sh",
+	has("egress:apply", "security.acls.default.egress.action=reject", `destination_port: "443"`, "registry.npmjs.org", "api.cursor.com", "api2.cursor.sh", "bun.sh",
 		"OnUnitActiveSec=10min", "--mode 0644")
 	has("token:apply", "vibechat-server token new 2>/dev/null")
 	has("tunnel:apply", `LINE='restrict,port-forwarding,permitopen="127.0.0.1:18120",permitopen="127.0.0.1:18121" ssh-ed25519 `, "--shell /usr/sbin/nologin")

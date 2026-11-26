@@ -50,11 +50,13 @@ const (
 	LimitDisk   = "15GiB"
 )
 
-// DefaultDomains is the egress allowlist: Cursor (the agent's API hosts from cursor.com/docs/enterprise/
-// network-configuration, no wildcards), npm (registry), Bun and GitHub (Bun releases, git over https, vibechat-server
+// DefaultDomains is the egress allowlist: Cursor (api.cursor.com, the SDK's public API the bridge calls for Me,
+// ListModels and agent create, which is not on Cursor's network page; then the agent's API hosts from
+// cursor.com/docs/enterprise/network-configuration; no wildcards), npm (registry), Bun and GitHub (Bun releases, git over https, vibechat-server
 // updates from GitHub releases). TCP 443 only.
 var DefaultDomains = []string{
 	// Cursor
+	"api.cursor.com",
 	"api2.cursor.sh", "api3.cursor.sh", "api4.cursor.sh", "api5.cursor.sh", "repo42.cursor.sh",
 	"agent.api5.cursor.sh", "agentn.api5.cursor.sh", "agent.us.api5.cursor.sh", "agentn.us.api5.cursor.sh",
 	"agent.global.api5.cursor.sh", "agentn.global.api5.cursor.sh",

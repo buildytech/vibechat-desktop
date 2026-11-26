@@ -71,7 +71,7 @@ grep -q 'security.nesting: "true"' <<<"$expanded" || fail "security.nesting"
 [ "$(ct awk 'NR == 1 {print $2}' /proc/self/uid_map)" != 0 ] || fail "root in the container is root on the host"
 echo "limits: 2 CPU, 4 GiB, 15 GiB, nesting, unprivileged: ok"
 reach() { ct curl -sS -o /dev/null -m 20 "$1"; }
-for u in https://registry.npmjs.org/ https://api2.cursor.sh/ https://bun.sh/ https://github.com/; do
+for u in https://registry.npmjs.org/ https://api.cursor.com/ https://api2.cursor.sh/ https://agent.api5.cursor.sh/ https://bun.sh/ https://github.com/; do
 	reach "$u" || fail "egress: $u is blocked"
 	echo "egress: $u allowed"
 done
@@ -79,6 +79,22 @@ for u in https://example.com/ https://1.1.1.1/ https://deb.debian.org/ http://re
 	if reach "$u" 2>/dev/null; then fail "egress: $u is reachable"; fi
 	echo "egress: $u blocked"
 done
+# The agent's own path through the allowlist without a real key: the bundled bridge's Me, ListModels and agent create
+# with a made-up key must reach Cursor and come back "unauthenticated", not "Network request failed" (a blocked host).
+checked="$(ct runuser -u vibechat -- sh -c 'd="$(mktemp -d)"; install -d -m 700 "$d/secrets"
+printf %s key_0000000000000000000000000000000000000000000000000000000000000000 > "$d/secrets/cursor-key"
+HOME=/var/lib/vibechat VIBECHAT_DATA_DIR="$d" PATH=/var/lib/vibechat/.bun/bin:/usr/bin:/bin timeout 120 vibechat-server --check-key 2>/dev/null
+rm -rf "$d"' || true)"
+echo "$checked" | grep -E '^FAIL (Me|model list|agent create):' || fail "check-key: no Cursor answers"
+for step in "Me" "model list" "agent create"; do
+	grep -q "^FAIL $step: .*unauthenticated" <<<"$checked" || fail "check-key: $step did not reach Cursor through the allowlist"
+done
+if grep -qi "network request failed" <<<"$checked"; then fail "check-key: a Cursor host is blocked"; fi
+echo "egress: the bridge reaches Cursor (Me, ListModels, agent create answer unauthenticated for a made-up key)"
+doc="$(ct runuser -u vibechat -- env HOME=/var/lib/vibechat vibechat-server doctor || true)"
+echo "$doc"
+grep -qE '^ok +bun +/var/lib/vibechat/\.bun/bin/bun ' <<<"$doc" || fail "doctor: bun"
+grep -qE '^ok +sandbox .*\(bridge release ' <<<"$doc" || fail "doctor: sandbox or the bridge release stamp"
 in_vm systemctl is-enabled -q vibechat-egress.timer || fail "vibechat-egress.timer"
 in_vm systemctl start vibechat-egress.service || fail "the egress refresh fails"
 reach https://registry.npmjs.org/ || fail "egress after a refresh"

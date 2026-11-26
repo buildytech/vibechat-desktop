@@ -268,7 +268,7 @@ password (`auth`): by design.
 
 **Egress allowlist.** An Incus network ACL `vibechat-egress` on `vibechatbr0`: egress default reject, only TCP 443 to
 the IPv4 addresses (/32) of these names, plus DNS to the bridge's dnsmasq:
-`api2.cursor.sh`, `api3.cursor.sh`, `api4.cursor.sh`, `api5.cursor.sh`, `repo42.cursor.sh`, `agent.api5.cursor.sh`,
+`api.cursor.com` (the Cursor SDK's API: account, model list, agent create; not on Cursor's network page), `api2.cursor.sh`, `api3.cursor.sh`, `api4.cursor.sh`, `api5.cursor.sh`, `repo42.cursor.sh`, `agent.api5.cursor.sh`,
 `agentn.api5.cursor.sh`, `agentn.us.api5.cursor.sh`, `agentn.global.api5.cursor.sh`, `authenticate.cursor.sh`,
 `authentication.cursor.sh`, `prod.authentication.cursor.sh` (Cursor's list, cursor.com/docs/enterprise/network-configuration),
 `registry.npmjs.org`, `bun.sh`, and GitHub for Bun / server updates (`github.com`, `api.github.com`,
