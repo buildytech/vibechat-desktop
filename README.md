@@ -146,8 +146,8 @@ The headless build has no auth: never expose it beyond loopback. It stays until 
 
 ## Server (preview) / Сервер (предварительно)
 
-`cmd/vibechat-server` is the same host on the user's own server: plain `net/http`, no Wails. The desktop app does not
-connect to it yet (next steps: SSH tunnel, setup wizard).
+`cmd/vibechat-server` is the same host on the user's own server: plain `net/http`, no Wails. The desktop app
+connects to it over SSH built into the app (Settings → Server); a setup wizard comes next.
 
 **Required server OS: Debian 13 "trixie", x86_64** (one Incus container per user, the container also Debian 13).
 Ubuntu and other systems are not supported for now; `vibechat-server doctor` warns on them. CI installs the `.deb`
@@ -160,7 +160,8 @@ in a Debian 13 Incus VM and in an Incus container inside it (`scripts/ci-server-
 - Auth: `vibechat-server token new` prints a host token once (32 random bytes) and keeps only its sha256
   (`/var/lib/vibechat/auth/token.sha256`, 0600). The app's Go side sends it as `Authorization: Bearer`, buys a
   one-time ticket (`POST /runtime/v1/auth/ticket`, 60 s) and opens `/auth/session?ticket=…` in the window, which sets
-  an HttpOnly SameSite=Strict cookie. `GET /runtime/v1/host/hello` (seam, server version, instance id, protocol,
+  an HttpOnly SameSite=Strict cookie and moves on to `/` with a meta refresh (a 303 would keep the app's own origin as
+  the navigation's initiator, and the Strict cookie would not be sent). `GET /runtime/v1/host/hello` (seam, server version, instance id, protocol,
   preview port, capabilities) is the only public route. The desktop app's own host has no auth and answers the ticket
   route with 404.
 - The Cursor key: `/var/lib/vibechat/secrets/cursor-key` (0600; a looser file is refused), set in Settings or with
@@ -177,8 +178,43 @@ sudo dpkg -i vibechat-server-linux-amd64.deb
 sudo -u vibechat vibechat-server token new     # copy the token (shown once)
 sudo -u vibechat vibechat-server set-key       # or later in Settings
 sudo systemctl start vibechat-server
-ssh -L 18120:127.0.0.1:18120 -L 18121:127.0.0.1:18121 you@server   # until the app does it
+# then in the app: Settings → Server (the lines below), or by hand in a browser:
+ssh -N -L 18120:127.0.0.1:18120 -L 18121:127.0.0.1:18121 you@server
 ```
+
+### The app's connection / Подключение приложения
+
+Settings → Server in the desktop app (`internal/remote`, the Studio's `GET/PUT/DELETE /runtime/v1/desktop/connection`,
+answered by the app itself, never by a server):
+
+- SSH is built in (`golang.org/x/crypto/ssh`, no `ssh` binary). The app makes an ed25519 key once and keeps the
+  private key in the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service; item
+  `vibechat-desktop` / `SSH_KEY`); Settings shows its public line and the root commands for the server: a user
+  `vibechat-tunnel` with no login shell whose key may only forward the two ports
+  (`restrict,port-forwarding,permitopen="127.0.0.1:18120",permitopen="127.0.0.1:18121"`).
+- The host token (`vibechat-server token new`) goes into the keychain too (`SERVER_HOST_TOKEN`), never into a file,
+  the log or the webview. `<data>/remote.json` (0600) has only the address, the user, the pinned host key and the
+  local port.
+- Host key: the first connect pins the key the server presents (trust on first use, ed25519 preferred); afterwards
+  only that key is accepted, a different one is `host_key_changed` (Settings: if you reinstalled the server, Forget
+  server and connect again). A reconnect after a network drop uses the same pin.
+- Connect: SSH → `GET /host/hello` through the tunnel → protocol check (the app speaks the pinned seam's `protocol`
+  and accepts servers down to its `minClientProtocol`; a mismatch shows the update screen) → `POST /auth/ticket` with
+  the Bearer token from Go → a local reverse proxy on `http://127.0.0.1:<L>` (L kept across restarts, so the
+  Studio's local storage survives) and the preview gateway's port forwarded as the same port on `127.0.0.1` and
+  `[::1]` → the window opens `http://127.0.0.1:<L>/auth/session?ticket=…`. An active server is connected again at
+  start; on failure the app stays on this computer and Settings says why.
+- In remote mode the Studio, the projects, the agent and the Cursor key are the server's: a key entered in Settings
+  is sent to the server (`secrets.File`, 0600 there), not kept on the PC. Settings shows the server version and a
+  warning when it is older than the app (it updates itself daily; `sudo vibechat-server update` to update now).
+  "Use this computer" goes back to the local host; "Forget server" also drops the pin and the token.
+- `*.localhost`: previews are `http://<projectId>.preview.localhost:18121/`; `vibechat --probe-localhost` checks that
+  the platform's webview resolves and frames such a name (CI runs it on Linux/WebKitGTK, Windows/WebView2 and
+  macOS/WKWebView).
+- Tests: `internal/remote` (an in-process SSH server with permitopen: transport, ticket flow, SSE, preview forward,
+  reconnect, TOFU and strict pinning, keychain mock, problems) and the e2e `scripts/ci-remote-e2e.sh` (CI, job
+  `server-debian`): a real sshd and the `.deb` in the Debian 13 VM, the tunnel user from the same lines Settings shows,
+  `go test -tags e2e -run TestE2E ./internal/remote` from the runner.
 
 The agent needs the runtime next to the binary: `go run ./cmd/fetch-bridge -out bin/bridge` downloads the
 cursor-sdk-bridge build and the SDK sandbox helper pinned in `bridge.lock.json` and verifies their SHA-256 / sha512.

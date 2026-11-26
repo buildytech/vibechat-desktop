@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -143,8 +144,11 @@ func TestBearerTicketSessionFlow(t *testing.T) {
 		t.Fatalf("ticket: %d %v", res.StatusCode, tk)
 	}
 	res = do(t, "GET", srv.URL+SessionPath+"?ticket="+tk["ticket"], nil)
-	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/" {
+	if res.StatusCode != http.StatusOK || res.Header.Get("Location") != "" {
 		t.Fatalf("session: %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+	if page, _ := io.ReadAll(res.Body); !strings.Contains(string(page), `http-equiv="refresh" content="0;url=/"`) {
+		t.Fatalf("session page %q", page)
 	}
 	var c *http.Cookie
 	for _, x := range res.Cookies() {

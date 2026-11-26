@@ -120,7 +120,7 @@ func TestFrontDoor(t *testing.T) {
 		t.Fatalf("expiresAt %q", tk.ExpiresAt)
 	}
 	res, _ = call(t, "GET", srv.URL+"/auth/session?ticket="+tk.Ticket, nil)
-	if res.StatusCode != http.StatusSeeOther {
+	if res.StatusCode != http.StatusOK {
 		t.Fatalf("session: %d", res.StatusCode)
 	}
 	var cookie string

@@ -10,14 +10,17 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 
 	vibechat "github.com/buildytech/vibechat-desktop"
 	"github.com/buildytech/vibechat-desktop/internal/appid"
@@ -76,6 +79,13 @@ func main() {
 	}
 	h, closeHost := newHost(seam)
 	defer closeHost()
+	var mainWindow *application.WebviewWindow
+	conn := newRemote(seam, func(u string) {
+		if mainWindow != nil {
+			mainWindow.SetURL(u)
+		}
+	})
+	defer conn.Close()
 
 	app := application.New(application.Options{
 		Name:        appid.Name,
@@ -85,11 +95,11 @@ func main() {
 		Windows: application.WindowsOptions{WebviewUserDataPath: webviewDataDir()},
 		Server:  serverOptions(),
 		Assets: application.AssetOptions{
-			Handler:    webapp.Handler(vibechat.Frontend()),
-			Middleware: host.Middleware(seam.Prefix, h),
+			Handler: webapp.Handler(vibechat.Frontend()),
+			// The desktop connection routes (remote: this app ↔ vibechat-server over SSH) first, then the host seam.
+			Middleware: func(next http.Handler) http.Handler { return conn.Middleware(host.Middleware(seam.Prefix, h)(next)) },
 		},
 	})
-	var mainWindow *application.WebviewWindow
 	if menu := appMenu(app, func() *application.WebviewWindow { return mainWindow }); menu != nil {
 		app.Menu.Set(menu)
 	}
@@ -99,6 +109,10 @@ func main() {
 		Height:             900,
 		URL:                "/",
 		UseApplicationMenu: true,
+	})
+	// A saved, active server: connect at start (on failure the app stays local and Settings shows why).
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		go conn.Resume(context.Background())
 	})
 	if err := app.Run(); err != nil {
 		closeHost()

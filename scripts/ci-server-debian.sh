@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # CI (GitHub ubuntu runner with KVM): the server .deb on Debian 13, the only supported server OS.
 #   1. a Debian 13 Incus VM (real Debian kernel, systemd): scripts/server-smoke.sh, sandbox preflight required;
-#   2. inside that VM, an Incus container like a user's server (scripts/incus-container-smoke.sh), sandbox required.
+#   2. the desktop app's SSH connection to that VM's server, end to end (scripts/ci-remote-e2e.sh);
+#   3. inside that VM, an Incus container like a user's server (scripts/incus-container-smoke.sh), sandbox required.
 # Usage: ci-server-debian.sh <deb>
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -22,6 +23,9 @@ sudo incus file push "$deb" "$vm/root/vibechat-server.deb"
 sudo incus file push scripts/server-smoke.sh scripts/incus-container-smoke.sh "$vm/root/"
 echo "::group::Debian 13 VM"
 sudo incus exec "$vm" -- bash /root/server-smoke.sh /root/vibechat-server.deb --require-sandbox
+echo "::endgroup::"
+echo "::group::Desktop app ↔ server over SSH (e2e)"
+bash scripts/ci-remote-e2e.sh "$vm"
 echo "::endgroup::"
 echo "::group::Incus container in the Debian 13 VM"
 sudo incus exec "$vm" -- bash /root/incus-container-smoke.sh /root/vibechat-server.deb /root/server-smoke.sh --require-sandbox

@@ -17,5 +17,5 @@ passed="$(go test -count=1 -run TestHostSeamContract -v ./internal/host | grep -
 echo "gate: host seam contract cases: $passed"
 go build -tags server -o bin/vibechat-headless ./cmd/vibechat
 go build -o bin/vibechat-server ./cmd/vibechat-server
-GOOS=windows go vet ./cmd/vibechat-server ./internal/auth ./internal/privfile ./internal/hostwire
+GOOS=windows go vet ./cmd/vibechat-server ./internal/auth ./internal/privfile ./internal/hostwire ./internal/remote
 echo "gate: ok (studio $(git -C third_party/studio rev-parse --short HEAD), templates $(git -C third_party/templates rev-parse --short HEAD))"

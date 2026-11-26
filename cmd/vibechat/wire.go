@@ -7,6 +7,7 @@ import (
 	"github.com/buildytech/vibechat-desktop/internal/host"
 	"github.com/buildytech/vibechat-desktop/internal/hostwire"
 	"github.com/buildytech/vibechat-desktop/internal/preview"
+	"github.com/buildytech/vibechat-desktop/internal/remote"
 	"github.com/buildytech/vibechat-desktop/internal/secrets"
 )
 
@@ -38,4 +39,21 @@ func bridgeSmoke() int {
 func checkKey() int {
 	data, _ := hostwire.DesktopDirs()
 	return hostwire.CheckKey(data, hostwire.SetupLog(data, logName), secrets.Keys{}, "Settings in the app or `vibechat --set-key`")
+}
+
+// newRemote is the connection to the owner's vibechat-server (SSH key and host token in the OS keychain, the saved
+// server in <data>/remote.json). The app speaks the pinned seam's protocol and accepts servers down to its
+// minClientProtocol (one compatibility window for both sides).
+func newRemote(seam host.Seam, navigate func(string)) *remote.Manager {
+	data, _ := hostwire.DesktopDirs()
+	m, err := remote.New(remote.Options{
+		DataDir: data, Creds: remote.Keyring{}, AppVersion: appid.Version,
+		AppProtocol: seam.Protocol, MinServerProtocol: seam.MinClientProtocol,
+		Prefix: seam.Prefix, SessionPath: seam.Auth.SessionPath, TicketParam: seam.Auth.TicketParam,
+		Navigate: navigate, Log: func(s string) { log.Print(s) },
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	return m
 }

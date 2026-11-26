@@ -23,6 +23,11 @@ type Seam struct {
 	Hello             []string    `json:"hello"`
 	Auth              SeamAuth    `json:"auth"`
 	Remote            []SeamRoute `json:"remote"`
+	// Desktop are the routes the desktop app itself answers (internal/remote), never a server: its connection to
+	// vibechat-server. DesktopConnection are the fields of their answer, TunnelUser the default SSH user.
+	Desktop           []SeamRoute `json:"desktop"`
+	DesktopConnection []string    `json:"desktopConnection"`
+	TunnelUser        string      `json:"tunnelUser"`
 }
 
 // SeamAuth are the session constants of the remote host (HOST_SESSION_PATH and friends).

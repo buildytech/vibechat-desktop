@@ -179,7 +179,7 @@ func (a *TokenAuth) redeem(ticket string) (string, bool) {
 	return s, true
 }
 
-// SessionHandler is GET /auth/session?ticket=…: a valid ticket sets the session cookie and redirects to "/".
+// SessionHandler is GET /auth/session?ticket=…: a valid ticket sets the session cookie and moves on to "/".
 func (a *TokenAuth) SessionHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -192,9 +192,22 @@ func (a *TokenAuth) SessionHandler() http.Handler {
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: s, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
-		w.Header().Set("cache-control", "no-store")
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		WriteSignedInPage(w)
 	})
+}
+
+// SignedInHTML moves the window on to "/" by itself. Not a 303: a redirect keeps the navigation's initiator (the
+// desktop app's own origin when it connects from Settings, or a link elsewhere), which is cross-site for
+// 127.0.0.1, so the SameSite=Strict cookie just set would not be sent to "/". A meta refresh is a new navigation
+// started by this origin.
+const SignedInHTML = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=/"><title>VibeChat</title></head><body><a href="/">Continue</a></body></html>`
+
+// WriteSignedInPage answers SignedInHTML (200, no-store).
+func WriteSignedInPage(w http.ResponseWriter) {
+	w.Header().Set("cache-control", "no-store")
+	w.Header().Set("content-type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(SignedInHTML))
 }
 
 // LoopbackHost reports whether a Host header names this machine by a literal that DNS cannot repoint: 127.0.0.1,

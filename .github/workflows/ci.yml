@@ -86,7 +86,7 @@ jobs:
                 echo "retry with the WebKit sandbox off (Ubuntu runner: AppArmor restricts user namespaces)"
                 GTK_A11Y=none WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 xvfb-run -a bin/vibechat --probe-localhost; code=$?
               fi ;;
-            Windows) bin/vibechat.exe --probe-localhost; code=$? ;;
+            Windows) cp bin/vibechat bin/vibechat-probe.exe && bin/vibechat-probe.exe --probe-localhost; code=$? ;;
             macOS)   bin/vibechat --probe-localhost; code=$? ;;
           esac
           [ "$code" = 0 ] || echo "::warning::webview *.localhost probe failed on $RUNNER_OS (exit $code)"
@@ -208,11 +208,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - uses: actions/download-artifact@v4
         with:
           name: vibechat-installer-ubuntu-24.04
           path: dist
-      - name: Server on Debian 13 (Incus VM, then an Incus container inside it)
+      - name: Server on Debian 13 (Incus VM, the desktop SSH connection e2e, then an Incus container inside it)
         run: bash scripts/ci-server-debian.sh dist/vibechat-server-linux-amd64.deb
 
   # Tag v* → GitHub Release with stable asset names, so
@@ -250,7 +253,7 @@ jobs:
           [vibechat-server-linux-amd64.deb](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-server-linux-amd64.deb)
           — the agent host on 127.0.0.1 only (reach it through SSH), host token, Cursor key in a 0600 file on the server,
           daily self-update from these releases (`vibechat-update.timer`, checked against `SHA256SUMS`). The desktop
-          app does not connect to it yet.
+          app connects to it over SSH built into the app: Settings → Server.
 
           Builds are **not signed or notarized**.
           - macOS: after unzipping, run `xattr -dr com.apple.quarantine "BuildY VibeChat.app"` (or right-click → Open).

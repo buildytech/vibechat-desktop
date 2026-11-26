@@ -124,6 +124,19 @@ func probeLocalhost() int {
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title: "probe", Width: 480, Height: 320, URL: "http://" + page.Addr().String() + "/",
 	})
+	// Print and exit from here: on macOS app.Quit ends the process inside app.Run (the result was lost in CI).
+	report := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		res.OS = goos()
+		out, _ := json.Marshal(res)
+		fmt.Println("probe-localhost:", string(out))
+		_ = os.Stdout.Sync()
+		if res.FrameLoaded && res.FramePing {
+			return 0
+		}
+		return 1
+	}
 	go func() {
 		select {
 		case <-done:
@@ -132,20 +145,12 @@ func probeLocalhost() int {
 			res.TimedOut = true
 			mu.Unlock()
 		}
-		app.Quit()
+		os.Exit(report())
 	}()
 	if err := app.Run(); err != nil {
 		fmt.Println("probe-localhost: app:", err)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	res.OS = goos()
-	out, _ := json.Marshal(res)
-	fmt.Println("probe-localhost:", string(out))
-	if res.FrameLoaded && res.FramePing {
-		return 0
-	}
-	return 1
+	return report()
 }
 
 func goos() string { return goruntime.GOOS + "/" + goruntime.GOARCH + " " + os.Getenv("RUNNER_OS") }
