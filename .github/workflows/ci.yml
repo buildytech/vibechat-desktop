@@ -19,7 +19,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       # The app version: scripts/package.sh and the desktop build stamp it (internal/appid.Version); a v* tag wins.
-      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.0' }}
+      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.1' }}
     defaults:
       run:
         shell: bash
@@ -130,7 +130,7 @@ jobs:
   server:
     runs-on: ubuntu-24.04
     env:
-      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.0' }}
+      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.1' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -270,6 +270,41 @@ jobs:
       - name: Release notes
         run: |
           cat > notes.md <<'EOF'
+          ## 0.2.1
+
+          **Fixed: the agent could not reach Cursor on a wizard-built server / Исправлено: агент не достучался до Cursor на
+          сервере, настроенном мастером.** The container's egress allowlist lacked `api.cursor.com` (the Cursor SDK's API
+          for the account, the model list and agent create), so every agent call failed with "Network request failed" and
+          the Studio model menu showed only Auto. The allowlist now has it, and CI checks that the agent runtime reaches
+          Cursor from the container.
+
+          **Servers set up with 0.2.0 must run the setup wizard again with the 0.2.1 app** (the allowlist lives on the host,
+          the server's self-update does not change it). The wizard skips the steps that are done and rewrites the egress
+          allowlist. After the lockdown the root password is refused, so first sign in as root with your own SSH key (or the
+          provider's web console), run `rm /etc/ssh/sshd_config.d/00-vibechat.conf && systemctl reload ssh`, then run
+          Settings → Set up a new server; the wizard turns password login off again at the end.
+
+          **Серверы, настроенные в 0.2.0, нужно заново провести через мастер настройки в приложении 0.2.1** (список
+          разрешённых адресов лежит на хосте, самообновление сервера его не меняет). Мастер пропустит готовые шаги и
+          перепишет список. После блокировки пароль root не принимается: сначала войдите как root своим SSH-ключом (или
+          через веб-консоль провайдера), выполните `rm /etc/ssh/sshd_config.d/00-vibechat.conf && systemctl reload ssh`,
+          затем «Настроить новый сервер»; в конце мастер снова отключит вход по паролю.
+
+          **Fixed: `vibechat-server doctor` / Исправлено: doctor.** It finds Bun where the service does
+          (`<data>/.bun/bin`) instead of warning "not on PATH", and the bridge line shows the pinned release
+          (`release 1.2.0 (manifest bridgeVersion 1.0.0, sdk 1.2.0)`) instead of the stale manifest version. Doctor находит
+          Bun там же, где сервис, и показывает настоящую версию bridge.
+
+          **New: Download ZIP in the Editor / Новое: «Скачать ZIP» во вкладке Editor.** The Editor toolbar has a
+          Download ZIP button: the project's files as a ZIP, without `.git`, `node_modules`, build output and caches,
+          `.env` / `.env.*` files (`.env.example` is kept), logs, OS files and the agent's local `.cursor` tool config
+          (rules and skills are kept); symlinks are never followed; up to 512 MiB / 50 000 files. In the app the system's
+          Save dialog opens (Downloads by default). Кнопка «Скачать ZIP» в панели Editor: файлы проекта без git,
+          `node_modules`, сборки и `.env`; в приложении открывается системный диалог «Сохранить как».
+
+          Not verified yet: the Save dialog in the installed app on a real Mac, Windows and Linux desktop; the wizard rerun
+          on a real 0.2.0 VPS (CI runs it on Debian 13 Incus VMs). Please report problems.
+
           ## 0.2.0: the app is a window to your server / Приложение — окно к вашему серверу
 
           **Breaking: the desktop app no longer runs anything on this computer.** No local agent, no local projects, no
