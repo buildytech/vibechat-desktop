@@ -217,6 +217,11 @@ answered by the app itself, never by a server):
   gateway as `<id>.preview.localhost:18121` (Origin / Referer mapped too), and the local port 18121 maps Vite's HMR
   socket (`ws://127.0.0.1:18121`, Origin `http://127.0.0.1:<P>`) to its project. `VIBECHAT_PREVIEW_PORTS=1|0`
   forces it on or off.
+- Settings → Server help (Studio, a lazy card, EN — RU): signing in as root with your own SSH key once root password
+  login is off (key paths on Windows / macOS / Linux, `ssh-copy-id` or the PowerShell line, the provider's web console
+  as the way back; the app's tunnel key cannot sign in) and backups of `/var/lib/vibechat` to an S3-compatible bucket
+  with restic (a 0600 env file, `restic init`, a daily systemd service + timer with `forget --prune`, `restic
+  snapshots`, restore with the server stopped). Commands: `third_party/studio/apps/studio/src/server-help.ts`.
 - Tests: `internal/remote` (an in-process SSH server with permitopen: transport, ticket flow, SSE, preview forward,
   reconnect, TOFU and strict pinning, keychain mock, problems) and the e2e `scripts/ci-remote-e2e.sh` (CI, job
   `server-debian`): a real sshd and the `.deb` in the Debian 13 VM, the tunnel user from the same lines Settings shows,
