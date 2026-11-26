@@ -307,12 +307,18 @@ func (m *Manager) serveProvision(w http.ResponseWriter, r *http.Request) {
 // connections (seen in CI right after the lockdown); the confirmation waits that out instead of failing.
 var confirmRefusedFor = 20 * time.Second
 
+// refused: the port is closed for now ("connection refused"; Windows: "… actively refused it").
+func refused(err error) bool {
+	m := err.Error()
+	return strings.Contains(m, "connection refused") || strings.Contains(m, "actively refused")
+}
+
 // whileRefused retries f while it fails with "connection refused", for at most d; any other answer ends it.
 func whileRefused(ctx context.Context, d time.Duration, f func() error) error {
 	deadline := time.Now().Add(d)
 	for {
 		err := f()
-		if err == nil || !strings.Contains(err.Error(), "connection refused") || time.Now().After(deadline) {
+		if err == nil || !refused(err) || !time.Now().Before(deadline) {
 			return err
 		}
 		select {
