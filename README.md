@@ -209,8 +209,14 @@ answered by the app itself, never by a server):
   warning when it is older than the app (it updates itself daily; `sudo vibechat-server update` to update now).
   "Use this computer" goes back to the local host; "Forget server" also drops the pin and the token.
 - `*.localhost`: previews are `http://<projectId>.preview.localhost:18121/`; `vibechat --probe-localhost` checks that
-  the platform's webview resolves and frames such a name (CI runs it on Linux/WebKitGTK, Windows/WebView2 and
-  macOS/WKWebView).
+  the platform's webview resolves and frames such a name (CI on Linux/WebKitGTK, Windows/WebView2 and
+  macOS/WKWebView, also from the `.app`). WebView2 and WebKitGTK: yes. macOS: no — its system resolver answers "no
+  such host" for `*.localhost` (not App Transport Security: `localhost` and `127.0.0.1` load). So on macOS every
+  preview gets its own `http://127.0.0.1:<P>` from the app (`internal/remote/previewports.go`): the window proxy
+  rewrites the preview URLs in the seam's project/ensure/status/grant answers, the per-project proxy talks to the
+  gateway as `<id>.preview.localhost:18121` (Origin / Referer mapped too), and the local port 18121 maps Vite's HMR
+  socket (`ws://127.0.0.1:18121`, Origin `http://127.0.0.1:<P>`) to its project. `VIBECHAT_PREVIEW_PORTS=1|0`
+  forces it on or off.
 - Tests: `internal/remote` (an in-process SSH server with permitopen: transport, ticket flow, SSE, preview forward,
   reconnect, TOFU and strict pinning, keychain mock, problems) and the e2e `scripts/ci-remote-e2e.sh` (CI, job
   `server-debian`): a real sshd and the `.deb` in the Debian 13 VM, the tunnel user from the same lines Settings shows,
