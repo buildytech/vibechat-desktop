@@ -112,7 +112,7 @@ func main() {
 	})
 	// A saved, active server: connect at start (on failure the app stays local and Settings shows why).
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		go conn.Resume(context.Background())
+		conn.StartResume(context.Background())
 	})
 	if err := app.Run(); err != nil {
 		closeHost()

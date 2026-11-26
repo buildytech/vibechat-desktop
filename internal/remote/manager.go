@@ -86,6 +86,7 @@ type ServerView struct {
 // Connection is DesktopConnectionSchema.
 type Connection struct {
 	Mode           string      `json:"mode"`
+	Connecting     bool        `json:"connecting,omitempty"`
 	AppVersion     string      `json:"appVersion"`
 	AppProtocol    int         `json:"appProtocol"`
 	SSHPublicKey   string      `json:"sshPublicKey"`
@@ -117,6 +118,8 @@ type Manager struct {
 	problem  *Problem
 	pub      string
 	closing  chan struct{} // closed when the last session's delayed close is done
+	// connecting: a Connect or Resume is in progress (the start screen shows "Connecting…").
+	connecting bool
 
 	prov        *Provision // the setup wizard's current or last run
 	provRunning bool
@@ -149,7 +152,7 @@ func (m *Manager) Connection() Connection {
 	pub := m.publicKey()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	c := Connection{Mode: "local", AppVersion: m.o.AppVersion, AppProtocol: m.o.AppProtocol, SSHPublicKey: pub, Server: m.server, ServerOutdated: m.outdated, Problem: m.problem}
+	c := Connection{Mode: "local", AppVersion: m.o.AppVersion, AppProtocol: m.o.AppProtocol, SSHPublicKey: pub, Server: m.server, ServerOutdated: m.outdated, Problem: m.problem, Connecting: m.connecting}
 	if m.sess != nil {
 		c.Mode = "remote"
 	}
@@ -195,6 +198,21 @@ func (m *Manager) Connect(ctx context.Context, in ConnectInput) Connection {
 	return m.Connection()
 }
 
+// StartResume marks the start-up reconnect at once (the start screen shows "Connecting…" instead of the choice)
+// and runs Resume in the background.
+func (m *Manager) StartResume(ctx context.Context) {
+	m.mu.Lock()
+	active := m.target != nil && m.target.Active
+	if active {
+		m.connecting = true
+	}
+	m.mu.Unlock()
+	if !active {
+		return
+	}
+	go m.Resume(ctx)
+}
+
 // Resume connects to the saved server at start when it is active (the token from the keychain).
 func (m *Manager) Resume(ctx context.Context) {
 	m.op.Lock()
@@ -203,6 +221,9 @@ func (m *Manager) Resume(ctx context.Context) {
 	t := m.target
 	m.mu.Unlock()
 	if t == nil || !t.Active {
+		m.mu.Lock()
+		m.connecting = false
+		m.mu.Unlock()
 		return
 	}
 	m.connect(ctx, ConnectInput{Address: t.Address, User: t.User}, true)
@@ -213,7 +234,13 @@ func (m *Manager) connect(ctx context.Context, in ConnectInput, resume bool) {
 	m.mu.Lock()
 	old := m.target
 	m.server, m.outdated, m.problem = nil, false, nil
+	m.connecting = true
 	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.connecting = false
+		m.mu.Unlock()
+	}()
 	hostport, err := sshAddr(addr)
 	if err == nil {
 		err = checkUser(user)

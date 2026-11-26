@@ -602,3 +602,37 @@ func TestPreviewPortPerProject(t *testing.T) {
 		t.Fatalf("origin changed: %v", list)
 	}
 }
+
+// TestStartResumeShowsConnecting: the start-up reconnect is visible at once (the start screen shows "Connecting…")
+// and ends with the problem when the server does not answer.
+func TestStartResumeShowsConnecting(t *testing.T) {
+	m, err := New(Options{DataDir: t.TempDir(), Creds: &MemCreds{}, Prefix: "/runtime/v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Connection().Connecting {
+		t.Fatal("connecting without a saved server")
+	}
+	m.StartResume(context.Background())
+	if m.Connection().Connecting {
+		t.Fatal("connecting without an active server")
+	}
+	m.target = &Target{Address: "127.0.0.1:1", User: "vibechat-tunnel", Active: true}
+	m.op.Lock() // hold the reconnect until the state is checked
+	m.StartResume(context.Background())
+	if !m.Connection().Connecting {
+		m.op.Unlock()
+		t.Fatal("the start-up reconnect is not shown")
+	}
+	m.op.Unlock()
+	deadline := time.Now().Add(20 * time.Second)
+	for m.Connection().Connecting {
+		if time.Now().After(deadline) {
+			t.Fatal("still connecting")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if c := m.Connection(); c.Problem == nil || c.Mode != "local" {
+		t.Fatalf("after a failed reconnect: %+v", c)
+	}
+}
