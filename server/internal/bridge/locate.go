@@ -23,6 +23,24 @@ type Manifest struct {
 	Entrypoint    string `json:"entrypoint"`
 	Protocol      string `json:"protocol"`
 	Runtime       string `json:"runtime"`
+	// Release is stamped by cmd/fetch-bridge: the pinned GitHub release (server/bridge.lock.json). The upstream
+	// manifest's bridgeVersion is not bumped with the releases (v1.2.0 still says 1.0.0), so this is what to report.
+	Release struct {
+		Version string `json:"version"`
+	} `json:"release"`
+}
+
+// Describe names the bridge for logs and doctor: the pinned release, the upstream manifest's own version when it
+// differs, and the SDK version.
+func (m Manifest) Describe() string {
+	switch {
+	case m.Release.Version != "" && m.Release.Version != m.BridgeVersion:
+		return fmt.Sprintf("release %s (manifest bridgeVersion %s, sdk %s)", m.Release.Version, m.BridgeVersion, m.SDKVersion)
+	case m.Release.Version != "":
+		return fmt.Sprintf("release %s (sdk %s)", m.Release.Version, m.SDKVersion)
+	default:
+		return fmt.Sprintf("%s (sdk %s; no release stamp)", m.BridgeVersion, m.SDKVersion)
+	}
 }
 
 // Install is a located bridge directory (the extracted standalone archive plus the sandbox helper).

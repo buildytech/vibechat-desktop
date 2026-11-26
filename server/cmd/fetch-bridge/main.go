@@ -112,6 +112,9 @@ func main() {
 	if err := untar(helperTgz, helperDir, "package/"); err != nil {
 		log.Fatalf("helper: %v", err)
 	}
+	if err := stampRelease(filepath.Join(*out, "manifest.json"), l.Bridge.Version); err != nil {
+		log.Fatalf("bridge manifest: %v", err)
+	}
 	runtimeNote := "upstream runtime"
 	if needsBaseline(l, *plat) {
 		if err := rebuildBaseline(l, *plat, *out, *cache); err != nil {
@@ -208,4 +211,20 @@ func untar(data []byte, dst, prefix string) error {
 			}
 		}
 	}
+}
+
+// stampRelease adds "release": {"version": <lock's bridge version>} to the bridge manifest: the upstream manifest's
+// bridgeVersion is not bumped with the releases, and doctor / the log report the pinned release from here.
+func stampRelease(manifestPath, version string) error {
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return err
+	}
+	m["release"] = map[string]any{"version": version}
+	enc, _ := json.MarshalIndent(m, "", "  ")
+	return os.WriteFile(manifestPath, append(enc, '\n'), 0o644)
 }

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -69,7 +70,7 @@ func doctor(p paths, listen string, out io.Writer) int {
 	cs = append(cs, kernelChecks()...)
 	cs = append(cs, sandboxCheck(p))
 	for _, tool := range []string{"bun", "git"} {
-		if path, err := exec.LookPath(tool); err != nil {
+		if path, err := lookTool(p, tool); err != nil {
 			cs = append(cs, warn(tool, "not on PATH: projects need it"))
 		} else {
 			v, _ := procgroup.Command(path, "--version").Output()
@@ -84,6 +85,15 @@ func doctor(p paths, listen string, out io.Writer) int {
 		}
 	}
 	return code
+}
+
+// lookTool finds a project tool the way the service does: its PATH starts with <data>/.bun/bin (where the setup
+// wizard puts Bun, HOME of the vibechat user), which a doctor run from a shell usually does not have.
+func lookTool(p paths, tool string) (string, error) {
+	if path, err := exec.LookPath(tool); err == nil {
+		return path, nil
+	}
+	return exec.LookPath(filepath.Join(p.data, ".bun", "bin", tool))
 }
 
 // sandboxCheck runs the agent runtime's own gate: bridge found, helper present, `cursorsandbox --preflight-only`.
@@ -103,7 +113,7 @@ func sandboxCheck(p paths) check {
 	if r.Unsandboxed() {
 		return bad("sandbox", "the agent would run without the SDK sandbox")
 	}
-	return ok("sandbox", "cursorsandbox --preflight-only passed (bridge "+install.Manifest.BridgeVersion+")")
+	return ok("sandbox", "cursorsandbox --preflight-only passed (bridge "+install.Manifest.Describe()+")")
 }
 
 // supportedOS is the only server system for now (the owner's decision; Ubuntu is not planned).

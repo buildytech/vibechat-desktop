@@ -44,3 +44,23 @@ func TestUntarRejectsTraversal(t *testing.T) {
 		t.Fatal("traversal accepted")
 	}
 }
+
+// The manifest keeps every upstream field and gains the pinned release.
+func TestStampRelease(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "manifest.json")
+	if err := os.WriteFile(p, []byte(`{"bridgeVersion":"1.0.0","protocol":"sdk.v1"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := stampRelease(p, "1.2.0"); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(p)
+	var m struct {
+		BridgeVersion string                   `json:"bridgeVersion"`
+		Protocol      string                   `json:"protocol"`
+		Release       struct{ Version string } `json:"release"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil || m.BridgeVersion != "1.0.0" || m.Protocol != "sdk.v1" || m.Release.Version != "1.2.0" {
+		t.Fatalf("%v %s", err, raw)
+	}
+}

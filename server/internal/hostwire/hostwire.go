@@ -57,7 +57,7 @@ func New(seam host.Seam, c Config) (*host.Host, func(), error) {
 	if err := runner.SandboxError(); err != nil {
 		log.Printf("agent disabled (fail closed): %v", err)
 	} else {
-		log.Printf("agent: cursor-sdk-bridge %s (sdk %s) with the SDK sandbox", install.Manifest.BridgeVersion, install.Manifest.SDKVersion)
+		log.Printf("agent: cursor-sdk-bridge %s with the SDK sandbox", install.Manifest.Describe())
 	}
 	h := host.New(host.Options{
 		Seam: seam, Version: appid.Version, Store: st, Agent: runner, Keys: c.Keys, Templates: assets.Templates(),
