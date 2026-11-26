@@ -17,7 +17,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       # The app version: scripts/package.sh and the desktop build stamp it (internal/appid.Version); a v* tag wins.
-      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.1.5' }}
+      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.1.6' }}
     defaults:
       run:
         shell: bash
@@ -245,6 +245,25 @@ jobs:
       - name: Release notes
         run: |
           cat > notes.md <<'EOF'
+          ## New: server mode over SSH / Новое: режим сервера по SSH
+
+          The desktop app can run the agent on your own server: Settings → Server. SSH is built into the app (no `ssh`
+          binary): the app's ed25519 key and the host token stay in the OS keychain, the server's host key is pinned on
+          the first connect and checked strictly afterwards, the window shows the server's Studio through a local tunnel
+          (`http://127.0.0.1:<port>`), previews are forwarded too. Settings shows the server version and warns when it is
+          older than the app; a protocol mismatch shows an update screen. In server mode the Cursor key is stored on the
+          server, not on the PC. Settings → Server shows the root commands for the tunnel user (port forwarding only, no
+          shell).
+
+          Приложение может запускать агента на вашем сервере: Настройки → Сервер. SSH встроен, ключи — в системной
+          связке ключей, ключ хоста закрепляется при первом подключении, ключ Cursor хранится на сервере.
+
+          Known limitation: on macOS the system resolver does not resolve `*.localhost`, so the app gives every preview
+          its own `http://127.0.0.1:<port>` there. This per-port scheme passes its tests but **has not been verified on
+          a real Mac yet**; please report preview problems on macOS (`VIBECHAT_PREVIEW_PORTS=0` turns it off).
+
+          `SHA256SUMS` lists the SHA-256 of every asset (the server's self-update checks the `.deb` against it).
+
           Portable builds (unzip and run; the agent runtime `bridge/` sits next to the executable):
 
           | System | Download | Requirements |
@@ -276,7 +295,7 @@ jobs:
 
           ## Windows: no sandbox / Windows: без песочницы
 
-          This release freezes the local version. On Windows the agent runs **without a sandbox** (cursor-sdk-bridge has
+          Local mode (the agent on this computer) is unchanged. On Windows the local agent runs **without a sandbox** (cursor-sdk-bridge has
           no filesystem sandbox on win32; its helper is a network proxy only), and the app shows a warning:
           - arbitrary shell commands with your user's rights **and network access** (the curl/wget blocklist is easy to
             get around: PowerShell `iwr`, `bun -e fetch`, `git clone`, `npm i`);
@@ -288,11 +307,11 @@ jobs:
           Open only trusted projects on Windows. macOS (Seatbelt) and Linux (Landlock + bubblewrap) run the agent in the
           SDK sandbox: writes only in the project, no network, fail closed.
 
-          **Decision: next versions move the agent to the user's server**: one Incus container per user (Debian 13), the
-          desktop app as a thin shell over built-in SSH (pinned host key, host token), the Cursor key stored on the server.
+          On Windows prefer server mode (above): the agent then runs in the SDK sandbox on your Debian 13 server. A setup
+          wizard for the server (Incus container per user) comes next.
 
-          В Windows агент работает без песочницы: открывайте только доверенные проекты. Следующие версии запускают агента
-          на вашем сервере (Incus, Debian 13), ключ хранится на сервере.
+          В Windows локальный агент работает без песочницы: открывайте только доверенные проекты или используйте режим
+          сервера (агент в песочнице на вашем сервере Debian 13).
 
           Log for bug reports: Windows `%APPDATA%\tw.buildy.vibechat\logs\vibechat.log`, macOS
           `~/Library/Application Support/tw.buildy.vibechat/logs/vibechat.log`, Linux `~/.config/tw.buildy.vibechat/logs/vibechat.log`.
