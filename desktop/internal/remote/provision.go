@@ -194,11 +194,15 @@ func (m *Manager) runProvision(addr, hostport string, pw []byte, rootKey string,
 		return nil
 	}
 	confirm := func(ctx context.Context) error {
-		if err := tunnel(ctx); err != nil {
+		if err := whileRefused(ctx, confirmRefusedFor, func() error { return tunnel(ctx) }); err != nil {
 			return err
 		}
 		var seen ssh.PublicKey
-		c, err := dialSSHAuth(ctx, hostport, "root", rootAuth, pin, &seen)
+		var c *ssh.Client
+		err := whileRefused(ctx, confirmRefusedFor, func() (err error) {
+			c, err = dialSSHAuth(ctx, hostport, "root", rootAuth, pin, &seen)
+			return err
+		})
 		if err == nil {
 			_ = c.Close()
 			return errors.New("the server still accepts the root password")
@@ -296,5 +300,25 @@ func (m *Manager) serveProvision(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, p)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+	}
+}
+
+// confirmRefusedFor: sshd on Debian 13 re-executes itself on `systemctl reload ssh`, and for a moment its port refuses
+// connections (seen in CI right after the lockdown); the confirmation waits that out instead of failing.
+var confirmRefusedFor = 20 * time.Second
+
+// whileRefused retries f while it fails with "connection refused", for at most d; any other answer ends it.
+func whileRefused(ctx context.Context, d time.Duration, f func() error) error {
+	deadline := time.Now().Add(d)
+	for {
+		err := f()
+		if err == nil || !strings.Contains(err.Error(), "connection refused") || time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
 }

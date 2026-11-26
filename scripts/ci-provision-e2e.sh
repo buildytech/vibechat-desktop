@@ -81,7 +81,7 @@ for u in https://example.com/ https://1.1.1.1/ https://deb.debian.org/ http://re
 done
 # The agent's own path through the allowlist without a real key: the bundled bridge's Me, ListModels and agent create
 # with a made-up key must reach Cursor and come back "unauthenticated", not "Network request failed" (a blocked host).
-checked="$(ct runuser -u vibechat -- sh -c 'd="$(mktemp -d)"; install -d -m 700 "$d/secrets"
+checked="$(ct runuser -u vibechat -- sh -c 'umask 077; d="$(mktemp -d)"; install -d -m 700 "$d/secrets"
 printf %s key_0000000000000000000000000000000000000000000000000000000000000000 > "$d/secrets/cursor-key"
 HOME=/var/lib/vibechat VIBECHAT_DATA_DIR="$d" PATH=/var/lib/vibechat/.bun/bin:/usr/bin:/bin timeout 120 vibechat-server --check-key 2>&1
 rm -rf "$d"' 2>&1 || true)"
