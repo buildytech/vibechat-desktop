@@ -33,7 +33,13 @@ func doctor(p paths, listen string, out io.Writer) int {
 	var cs []check
 	cs = append(cs, ok("version", "vibechat-server "+appid.Version+" "+runtime.GOOS+"/"+runtime.GOARCH))
 	if runtime.GOOS != "linux" {
-		cs = append(cs, bad("system", "the server runs on Linux (Debian 13)"))
+		cs = append(cs, bad("system", "the server runs on Debian 13 only"))
+	} else {
+		raw, err := os.ReadFile("/etc/os-release")
+		if err != nil {
+			raw, _ = os.ReadFile("/usr/lib/os-release")
+		}
+		cs = append(cs, osCheck(string(raw)))
 	}
 	if _, err := loopbackAddr(listen); err != nil {
 		cs = append(cs, bad("listen", err.Error()))
@@ -98,4 +104,29 @@ func sandboxCheck(p paths) check {
 		return bad("sandbox", "the agent would run without the SDK sandbox")
 	}
 	return ok("sandbox", "cursorsandbox --preflight-only passed (bridge "+install.Manifest.BridgeVersion+")")
+}
+
+// supportedOS is the only server system for now (the owner's decision; Ubuntu is not planned).
+const supportedOS = "Debian 13 (trixie)"
+
+// osCheck reads os-release: ok on Debian 13, a clear warning on anything else.
+func osCheck(osRelease string) check {
+	kv := map[string]string{}
+	for _, line := range strings.Split(osRelease, "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if ok {
+			kv[k] = strings.Trim(v, `"'`)
+		}
+	}
+	name := kv["PRETTY_NAME"]
+	if name == "" {
+		name = strings.TrimSpace(kv["ID"] + " " + kv["VERSION_ID"])
+	}
+	if name == "" {
+		name = "unknown (no /etc/os-release)"
+	}
+	if kv["ID"] == "debian" && kv["VERSION_ID"] == "13" {
+		return ok("system", name)
+	}
+	return warn("system", name+": NOT SUPPORTED. VibeChat server requires "+supportedOS+"; other systems (Ubuntu included) are not supported for now")
 }

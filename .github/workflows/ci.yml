@@ -91,32 +91,6 @@ jobs:
         run: |
           export VIBECHAT_VERSION="${VIBECHAT_VERSION#v}"
           bash scripts/package-server.sh
-      # Install the .deb on the runner like a server: system user, units, host token, then the auth flow over
-      # loopback (hello public; Bearer → one-time ticket → HttpOnly session cookie; no auth → 401) and the doctor.
-      - name: Server package install smoke (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo dpkg -i dist/vibechat-server-linux-amd64.deb
-          systemctl is-enabled vibechat-update.timer vibechat-server.service
-          sudo -u vibechat env VIBECHAT_DATA_DIR=/var/lib/vibechat vibechat-server token new 2>/dev/null | tee "$RUNNER_TEMP/tok" >/dev/null
-          sudo stat -c '%a %U' /var/lib/vibechat /var/lib/vibechat/auth/token.sha256
-          sudo systemctl start vibechat-server.service
-          for _ in $(seq 1 50); do curl -fsS http://127.0.0.1:18120/runtime/v1/host/hello > hello.json 2>/dev/null && break; sleep 0.2; done
-          cat hello.json; echo
-          grep -q '"protocol":1' hello.json
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18120/runtime/v1/projects)" = 401
-          ticket=$(curl -fsS -X POST -H "Authorization: Bearer $(cat "$RUNNER_TEMP/tok")" http://127.0.0.1:18120/runtime/v1/auth/ticket | jq -r .ticket)
-          curl -fsS -c jar -o /dev/null "http://127.0.0.1:18120/auth/session?ticket=$ticket"
-          grep -q '#HttpOnly_127.0.0.1.*vibechat_session' jar
-          curl -fsS -b jar http://127.0.0.1:18120/runtime/v1/host/capabilities; echo
-          curl -fsS -b jar http://127.0.0.1:18120/ | grep -qi '<html\|<!doctype'
-          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: x.preview.localhost:18121' http://127.0.0.1:18121/)" = 404
-          rm -f "$RUNNER_TEMP/tok" jar
-          # Ubuntu runners restrict unprivileged user namespaces (AppArmor): the sandbox preflight fails at its
-          # loopback setup, the doctor reports it and the server keeps the agent off (fail closed).
-          sudo -u vibechat env VIBECHAT_DATA_DIR=/var/lib/vibechat vibechat-server doctor || echo "::warning::vibechat-server doctor reported FAIL (expected on Ubuntu runners: AppArmor restricts user namespaces)"
-          vibechat-server update --check || true
-          sudo journalctl -u vibechat-server --no-pager | tail -20
       # Agent runtime smoke from the shipped zip: unpack under a path with spaces and Cyrillic, run the app's own
       # --bridge-smoke (locate bridge next to the exe, sandbox preflight, private HOME/USERPROFILE, ready + Ping).
       - name: Bridge smoke from the portable zip
@@ -204,10 +178,28 @@ jobs:
           path: dist/
           retention-days: 14
 
+  # The server .deb on Debian 13 (the only supported server OS): a Debian 13 Incus VM (real Debian kernel, systemd)
+  # with the install + auth smoke and the SDK sandbox preflight required, then an Incus container inside it like a
+  # user's server (scripts/ci-server-debian.sh). The binaries are still built on the Ubuntu runner above.
+  server-debian:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: vibechat-installer-ubuntu-24.04
+          path: dist
+      - name: Server on Debian 13 (Incus VM, then an Incus container inside it)
+        run: bash scripts/ci-server-debian.sh dist/vibechat-server-linux-amd64.deb
+
   # Tag v* → GitHub Release with stable asset names, so
   # https://github.com/buildytech/vibechat-desktop/releases/latest/download/<name> always points at the newest build.
   release:
-    needs: build
+    needs: [build, server-debian]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
@@ -234,7 +226,8 @@ jobs:
 
           Installers are attached too: `.deb` (Linux), `vibechat-amd64-installer.exe` (Windows), `.dmg` (macOS).
 
-          Server (preview, Debian 13 / one Incus container per user):
+          Server (preview; requires Debian 13 "trixie" x86_64, Ubuntu and other systems are not supported for now; one
+          Incus container per user):
           [vibechat-server-linux-amd64.deb](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-server-linux-amd64.deb)
           — the agent host on 127.0.0.1 only (reach it through SSH), host token, Cursor key in a 0600 file on the server,
           daily self-update from these releases (`vibechat-update.timer`, checked against `SHA256SUMS`). The desktop

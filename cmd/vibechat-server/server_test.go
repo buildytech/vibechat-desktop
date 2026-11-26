@@ -251,3 +251,19 @@ func TestUpdaterVerifiesTheSum(t *testing.T) {
 		t.Fatalf("update: %v", err)
 	}
 }
+
+func TestOSCheckWantsDebian13(t *testing.T) {
+	debian := "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"13\"\nID=debian\n"
+	if c := osCheck(debian); c.level != "ok" || !strings.Contains(c.detail, "trixie") {
+		t.Fatalf("debian 13: %+v", c)
+	}
+	for _, other := range []string{
+		"PRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\nID=ubuntu\nID_LIKE=debian\nVERSION_ID=\"24.04\"\n",
+		"PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nID=debian\nVERSION_ID=\"12\"\n",
+		"",
+	} {
+		if c := osCheck(other); c.level != "warn" || !strings.Contains(c.detail, "NOT SUPPORTED") || !strings.Contains(c.detail, "Debian 13") {
+			t.Errorf("%q: %+v", other, c)
+		}
+	}
+}

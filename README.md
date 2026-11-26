@@ -146,8 +146,13 @@ The headless build has no auth: never expose it beyond loopback. It stays until 
 
 ## Server (preview) / Сервер (предварительно)
 
-`cmd/vibechat-server` is the same host on the user's own server (Debian 13, one Incus container per user): plain
-`net/http`, no Wails. The desktop app does not connect to it yet (next steps: SSH tunnel, setup wizard).
+`cmd/vibechat-server` is the same host on the user's own server: plain `net/http`, no Wails. The desktop app does not
+connect to it yet (next steps: SSH tunnel, setup wizard).
+
+**Required server OS: Debian 13 "trixie", x86_64** (one Incus container per user, the container also Debian 13).
+Ubuntu and other systems are not supported for now; `vibechat-server doctor` warns on them. CI installs the `.deb`
+in a Debian 13 Incus VM and in an Incus container inside it (`scripts/ci-server-debian.sh`).
+Требуется Debian 13 (trixie); Ubuntu и другие системы пока не поддерживаются.
 
 - `127.0.0.1:18120`: the host seam `/runtime/v1/*` and the Studio; `127.0.0.1:18121`: the preview gateway,
   `http://<projectId>.preview.localhost:18121/` (one port for every preview; grants and cookies as in the app).
@@ -160,7 +165,8 @@ The headless build has no auth: never expose it beyond loopback. It stays until 
   route with 404.
 - The Cursor key: `/var/lib/vibechat/secrets/cursor-key` (0600; a looser file is refused), set in Settings or with
   `vibechat-server set-key` (stdin).
-- `vibechat-server doctor`: bridge + `cursorsandbox --preflight-only`, Landlock, user namespaces, token, key, bun, git.
+- `vibechat-server doctor`: system (Debian 13, else a warning), bridge + `cursorsandbox --preflight-only`, Landlock,
+  user namespaces, token, key, bun, git.
 - Package: `bash scripts/package-server.sh` → `dist/vibechat-server-linux-amd64.deb` (`/usr/lib/vibechat-server`,
   system user `vibechat`, `vibechat-server.service`, `vibechat-update.timer`). The timer runs
   `vibechat-server update` daily: the newest GitHub release, if newer, checked against its `SHA256SUMS`, then

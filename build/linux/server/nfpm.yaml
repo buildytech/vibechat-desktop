@@ -1,5 +1,6 @@
 # Linux .deb of the VibeChat server (scripts/package-server.sh: wails3 tool package -format deb, i.e. nfpm).
-# One user per server (one Incus container per user, Debian 13): the host listens on 127.0.0.1 only; the desktop
+# Requires Debian 13 (trixie); Ubuntu and other systems are not supported for now. One user per server (one Incus
+# container per user): the host listens on 127.0.0.1 only; the desktop
 # app reaches it through SSH. Data: /var/lib/vibechat (user vibechat, 0700).
 name: "vibechat-server"
 arch: ${GOARCH}
@@ -8,7 +9,7 @@ version: "${VIBECHAT_VERSION}"
 section: "web"
 priority: "optional"
 maintainer: "BuildY"
-description: "BuildY VibeChat server: the agent host (sandboxed Cursor agent, Studio, previews) on your own server, loopback only."
+description: "BuildY VibeChat server for Debian 13 (trixie): the agent host (sandboxed Cursor agent, Studio, previews) on your own server, loopback only. Other systems (Ubuntu included) are not supported."
 vendor: "BuildY"
 homepage: "https://github.com/buildytech/vibechat-desktop"
 license: "Apache-2.0"
