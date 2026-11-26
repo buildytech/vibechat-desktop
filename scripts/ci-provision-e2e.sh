@@ -83,9 +83,10 @@ done
 # with a made-up key must reach Cursor and come back "unauthenticated", not "Network request failed" (a blocked host).
 checked="$(ct runuser -u vibechat -- sh -c 'd="$(mktemp -d)"; install -d -m 700 "$d/secrets"
 printf %s key_0000000000000000000000000000000000000000000000000000000000000000 > "$d/secrets/cursor-key"
-HOME=/var/lib/vibechat VIBECHAT_DATA_DIR="$d" PATH=/var/lib/vibechat/.bun/bin:/usr/bin:/bin timeout 120 vibechat-server --check-key 2>/dev/null
-rm -rf "$d"' || true)"
-echo "$checked" | grep -E '^FAIL (Me|model list|agent create):' || fail "check-key: no Cursor answers"
+HOME=/var/lib/vibechat VIBECHAT_DATA_DIR="$d" PATH=/var/lib/vibechat/.bun/bin:/usr/bin:/bin timeout 120 vibechat-server --check-key 2>&1
+rm -rf "$d"' 2>&1 || true)"
+echo "$checked" | grep -v '^20[0-9][0-9]/' || true # the made-up key only; the log copies of the lines are dropped
+grep -qE '^FAIL (Me|model list|agent create):' <<<"$checked" || fail "check-key: no Cursor answers"
 for step in "Me" "model list" "agent create"; do
 	grep -q "^FAIL $step: .*unauthenticated" <<<"$checked" || fail "check-key: $step did not reach Cursor through the allowlist"
 done
