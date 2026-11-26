@@ -1,20 +1,39 @@
-# BuildY VibeChat desktop
+# BuildY VibeChat
 
-The [BuildY Studio](https://github.com/buildytech/studio) as a desktop app on [Wails 3](https://wails.io)
-(v3.1.0), for one user with their own Cursor API key.
+The desktop app is **a window to your own server**: the [BuildY Studio](https://github.com/buildytech/studio), the
+Cursor agent, projects and previews run in `vibechat-server` on a **Debian 13 "trixie" x86_64** server (one Incus
+container per user); the app ([Wails 3](https://wails.io), v3.1.0) connects to it over SSH built into the app.
+Nothing runs on the PC: no local agent, no local projects, no templates (since 0.2.0).
 
-This repository is **only the Go backend and the build**. Two public git submodules, pinned by commit:
+**Требуется сервер на Debian 13 (trixie), x86_64.** Приложение — только окно к серверу: агент, проекты и превью
+работают на сервере, приложение подключается к нему по встроенному SSH. Ubuntu и другие системы пока не поддерживаются.
 
-- `third_party/studio` = [buildytech/studio](https://github.com/buildytech/studio): the Studio, Agent Contract v1 and
-  the host seam (`packages/agent-contract/host-seam.json`, [ADR 0002](https://github.com/buildytech/studio/blob/main/docs/adr/0002-host-seam-contract.md));
-- `third_party/templates` = [buildytech/templates](https://github.com/buildytech/templates): `vite-svelte-bun` and
-  `vite-react-bun`.
+One repository, one Go module, three parts:
 
-Nothing in a submodule is edited here; a Studio or template change reaches the desktop app by moving the pin.
+- `protocol/` — what both sides share: the host seam contract of the pinned studio commit (`protocol.Pinned`, from
+  `third_party/studio/packages/agent-contract/host-seam.json`, embedded by the root package) and the token / ticket /
+  session auth (`protocol/auth`).
+- `server/` — `vibechat-server` (`server/cmd/vibechat-server`) and everything that runs the agent: `server/internal/`
+  host (the seam), agent, bridge, sandbox, preview, store, gitx, templates, secrets, hostwire, procgroup;
+  `server/cmd/fetch-bridge` and `server/bridge.lock.json` (the agent runtime); the built Studio
+  (`server/frontend/dist`) and the templates submodule (`server/third_party/templates`).
+- `desktop/` — the app (`desktop/cmd/vibechat`): the start screen (`desktop/shell`, built from the studio submodule),
+  the SSH connection (`desktop/internal/remote`) and the setup wizard (`desktop/internal/provision`). Go's internal
+  rule keeps `server/internal` out of reach of `desktop/`, and `scripts/check-desktop.sh` checks the packages the app
+  links and the built binary (CI on all three systems).
+- `internal/` — four small shared packages: `appid` (identity), `applog` (the log file), `privfile` (0600 files),
+  `webapp` (serving a built site).
+
+Two public git submodules, pinned by commit: `third_party/studio` =
+[buildytech/studio](https://github.com/buildytech/studio) (the Studio, the start screen, Agent Contract v1 and the
+host seam, [ADR 0002](https://github.com/buildytech/studio/blob/main/docs/adr/0002-host-seam-contract.md)) and
+`server/third_party/templates` = [buildytech/templates](https://github.com/buildytech/templates) (`vite-svelte-bun`,
+`vite-react-bun`). Nothing in a submodule is edited here; a change reaches this repository by moving the pin.
 
 ## Скачать / Download
 
-Portable zips of the latest release (unzip and run; `bridge/` — the agent runtime — must stay next to the executable):
+The app (portable zips of the latest release; installers `.deb`, NSIS `.exe`, `.dmg` are on the
+[releases page](https://github.com/buildytech/vibechat-desktop/releases/latest)):
 
 - **Linux x64**: [vibechat-desktop-linux-x64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-linux-x64.zip)
   — GTK 4 + WebKitGTK 6 (`sudo apt install libgtk-4-1 libwebkitgtk-6.0-4`; Ubuntu 24.04 / Debian 13 or newer).
@@ -26,72 +45,53 @@ Portable zips of the latest release (unzip and run; `bridge/` — the agent runt
   — macOS 12+. The app is not notarized: after unzipping run
   `xattr -dr com.apple.quarantine "BuildY VibeChat.app"` (or right-click → Open).
 
-Installers (`.deb`, NSIS `.exe`, `.dmg`) are on the [releases page](https://github.com/buildytech/vibechat-desktop/releases/latest).
-Projects need [Bun](https://bun.sh) 1.3.3 or newer on PATH (`bun upgrade`); an older Bun gets a clear «update Bun»
-message. A Cursor API key is needed for the agent: Settings in the app, or `vibechat --set-key`. The app log (bridge
-output included, key redacted) is `%APPDATA%\tw.buildy.vibechat\logs\vibechat.log` on Windows,
+And a server: a Debian 13 x86_64 VPS (≥ 2 GiB RAM, ≥ 18 GiB free disk for the wizard), see below.
+
+### First start / Первый запуск
+
+Without a saved server the window shows the start screen with two choices:
+
+- **Connect a server / Подключить сервер** — a server with `vibechat-server` already installed: address, SSH user
+  (`vibechat-tunnel`), the host token, and the lines for the server that add the app's SSH key (port forwarding
+  only). The first connect pins the server's host key.
+- **Set up a new server / Настроить новый сервер** — the wizard (below): a fresh VPS's address and the root password
+  once; the app installs everything and connects.
+
+With a saved server the app reconnects at start ("Connecting…") and opens the server's Studio directly; when that
+fails, the start screen shows why. Disconnect (Settings → Server in the server's Studio) goes back to the start
+screen. The Cursor key is entered in the server's Studio Settings and stays on the server. Projects made on the PC
+by versions before 0.2.0 stay in `~/VibeChat`; the app no longer opens them.
+
+The app log is `%APPDATA%\tw.buildy.vibechat\logs\vibechat.log` on Windows,
 `~/Library/Application Support/tw.buildy.vibechat/logs/vibechat.log` on macOS, `~/.config/tw.buildy.vibechat/logs/vibechat.log`
-on Linux; `vibechat --bridge-smoke` checks that the agent runtime starts. `vibechat --check-key` checks the stored key with Cursor (Me +
-agent create) and prints a non-secret diagnostic (length, first/last 4 characters, whitespace, source); on Windows
-run `vibechat.exe --check-key > check.txt`. The key is an API key of type **Cursor** (`grok_…`) from
-https://grok.com/dashboard/api-keys; "Grok API" keys (`xai-…`) do not work. Cursor answers an unknown `grok_…` key
-with `unauthenticated: Invalid Service Token`, an unknown key of another shape with `Invalid User API Key`. `vibechat --version` prints the
-version. Releases are built by CI from a `v*` tag.
-
-## Windows: no sandbox / Windows: без песочницы
-
-**v0.1.5 freezes the local version.** On Windows the agent runs **without a sandbox**: cursor-sdk-bridge 1.2.0 (and
-@cursor/sdk 1.5.0) has no filesystem sandbox on win32, its Windows helper is a network proxy only. The app shows a
-warning (EN + RU) in every project. What that means on Windows:
-
-- the agent runs arbitrary shell commands with your user's rights, **with network access** (the hook's blocklist of
-  `curl`/`wget`/`ssh`/… is easy to get around, e.g. PowerShell `iwr`, `bun -e fetch`, `git clone`, `npm i`);
-- shell commands can **write and read outside the project** (the hooks check the file tools and the shell's working
-  directory, not what a command touches);
-- there is **no approval** step: without the sandbox the SDK approves every action automatically;
-- the Cursor key reaches the bridge through its environment and is **likely visible to the agent's shell**.
-
-Open only trusted projects on Windows. On **macOS** (Seatbelt) and **Linux** (Landlock + bubblewrap, seccomp) the
-agent runs inside the SDK sandbox: writes only in the project, no network, fail closed if the sandbox is missing.
-
-**Decision: next versions move the agent to the user's server** — one Incus container per user (Debian 13), the
-desktop app becomes a thin shell connected over built-in SSH (pinned host key, host token), and the Cursor key is
-stored on the server, never on the PC.
-
-Кратко по-русски: в Windows агент работает без песочницы (shell-команды с доступом вашего пользователя к файлам и
-сети, без подтверждений, ключ, вероятно, виден shell). Открывайте только доверенные проекты. Следующие версии
-переносят агента на ваш сервер: контейнер Incus на пользователя (Debian 13), встроенный SSH, ключ хранится на сервере.
+on Linux. `vibechat --version` prints the version. Releases are built by CI from a `v*` tag.
 
 ## How it works
 
-- The window loads the built Studio (`apps/studio` `build:desktop`), embedded in the binary (`frontend/dist`, made by
-  `scripts/build-frontend.sh`).
-- The Studio calls the host with `fetch("/runtime/v1/...")`. The Wails asset-server middleware answers those paths in
-  Go, in process, on the app's own origin (`internal/host`). The route list is the pinned
-  `packages/agent-contract/host-seam.json`; a route this build does not serve yet answers 501 with `{ error }`.
-- The Cursor key is kept in the OS keychain (`github.com/zalando/go-keyring`). `CURSOR_API_KEY` in the environment is
-  the development fallback. The key never reaches the webview.
+- The desktop window loads the start screen (`desktop/shell`, studio `build:shell`), embedded in the binary. The app
+  answers only its own routes, `/runtime/v1/desktop/connection` and `/runtime/v1/desktop/provision`; every other seam
+  path is 404. Connected, the window moves to `http://127.0.0.1:<L>`, a local reverse proxy through the SSH tunnel to
+  the server's Studio.
+- On the server, the Studio calls the host with `fetch("/runtime/v1/...")` on the server's origin
+  (`server/internal/host`). The route list is the pinned `packages/agent-contract/host-seam.json`; a route the build
+  does not serve answers 501 with `{ error }`.
+- The Cursor key is a 0600 file on the server (`secrets.File`), never on the PC and never in the webview.
 
-### The agent: cursor-sdk-bridge in the SDK sandbox (fail closed)
+### The agent on the server: cursor-sdk-bridge in the SDK sandbox (fail closed)
 
-- One [cursor-sdk-bridge](https://github.com/cursor/cursor-sdk-bridge) process per app (`internal/bridge`), found in
-  `VIBECHAT_BRIDGE_DIR`, `<exe dir>/bridge`, `<exe dir>/../lib/vibechat/bridge` or `<app>/Contents/Resources/bridge`,
+- One [cursor-sdk-bridge](https://github.com/cursor/cursor-sdk-bridge) process per server (`server/internal/bridge`), found in
+  `VIBECHAT_BRIDGE_DIR` or `<exe dir>/bridge` (`/usr/lib/vibechat-server/bridge` from the `.deb`),
   with the platform helper `@cursor/sdk-<os>-<arch>` (`cursorsandbox`, `rg`) in `bin/node_modules/`. It listens on
   127.0.0.1 with a bearer token; the key reaches it only as `CURSOR_API_KEY` in its environment (never argv, a URL or a
   file). The catalog calls (`Me`, `ListModels`) need the key in their loopback request body; agent runs use the env.
-- **Editing keys belong to the page.** The Edit menu role is used only on macOS (a WKWebView needs it for Cmd+V). On
-  Windows and Linux it bound Ctrl+V/C/X/Z/A and Backspace as menu accelerators, so on Windows a Ctrl+V pasted twice
-  (the role's own paste on top of WebView2's). A message is stored and run once per `clientMsgId`; a repeat answers 409.
+- A message is stored and run once per `clientMsgId`; a repeat answers 409.
 - **The SDK sandbox is mandatory.** At start the host runs the helper's preflight; no bridge, no helper or a failed
-  preflight turns `agent_sandbox` off and every prompt answers 503. **Exception: Windows.** cursor-sdk-bridge 1.2.0
-  refuses a sandboxed local agent on win32 ("Local SDK sandboxing was requested, but sandboxing is not supported in
-  this environment": its Windows helper is proxy-only, no filesystem isolation), so on Windows agents are created
-  with `sandboxOptions.enabled=false` (logged at start); elsewhere that refusal is retried once without the sandbox
-  and logged. The permission hooks below and the workspace checks still apply; see «Windows: no sandbox» above
-  for what that leaves open.
+  preflight turns `agent_sandbox` off and every prompt answers 503 (Landlock + bubblewrap on the Debian 13 server).
+  The agent never runs on Windows or macOS any more: the old Windows-without-sandbox mode went away with the local
+  agent in 0.2.0.
 - The bridge runs with a private `HOME` (`<data>/agent-home`) that holds the user-level `.cursor/sandbox.json`
   (`readBoundary: workspace`, `networkAccess: false`, plus the tool runtimes and `/proc` Bun needs) and
-  `.cursor/hooks.json`: fail-closed `preToolUse` / `beforeReadFile` hooks that run this binary (`vibechat --hook`) and
+  `.cursor/hooks.json`: fail-closed `preToolUse` / `beforeReadFile` hooks that run the server binary (`vibechat-server --hook`) and
   deny file tools outside the workspace, MCP, network commands, and writes to agent config. A project that carries
   its own `.cursor/{hooks,sandbox,cli,permissions,mcp}.json` or `.claude/settings*.json` is refused before a run.
 - The agent's network is fully closed. Dependencies are installed by the host (`bun install`) outside the sandbox:
@@ -101,8 +101,7 @@ stored on the server, never on the PC.
 
 ### Projects, chats and worktrees
 
-- Projects live in `~/VibeChat/<name>` (`VIBECHAT_PROJECTS_DIR`), state in `<UserConfigDir>/tw.buildy.vibechat`
-  (`VIBECHAT_DATA_DIR`). Each project is a git repository (`main`) scaffolded from a template embedded from the
+- On the server, projects and state live under `/var/lib/vibechat` (the `vibechat` user). Each project is a git repository (`main`) scaffolded from a template embedded from the
   templates submodule.
 - Every chat works in its own git worktree, `<data>/worktrees/<project>/<chat>` on branch `vibe/<chat>`, outside the
   project folder. Before a run the worktree takes in `main`; after it the host commits the run and merges it into
@@ -112,43 +111,37 @@ stored on the server, never on the PC.
 ### Live preview
 
 - Play starts the project's dev server (`bun x vite --host 127.0.0.1 --port <port> --strictPort`) in its own process
-  group (on Windows also a Job Object with kill-on-close, so the tree dies with the app), after the host-side
-  `bun install`. Stop, deleting the project and quitting the app stop the whole group.
-- The Studio iframe opens a separate loopback origin, `http://127.0.0.1:<proxy port>` (`internal/preview`), never
-  the dev server directly. The host mints a one-time grant (`?__buildy_grant=…`, 60 s); the proxy also lets through
+  group, after the host-side `bun install`. Stop, deleting the project and stopping the server stop the whole group.
+- The Studio iframe opens the preview gateway, `http://<projectId>.preview.localhost:18121/` (`server/internal/preview`,
+  forwarded by the app through the tunnel; on macOS a local port per project), never the dev server directly. The host mints a one-time grant (`?__buildy_grant=…`, 60 s); the proxy also lets through
   requests with its session cookie or that the browser marks as coming from the preview itself (Sec-Fetch-Site
   same-origin / Origin / Referer), checks the Host header, and answers everything else 403.
-- Vite HMR runs over the proxy port (`HMR_CLIENT_PORT`), WebSocket included.
+- Vite HMR runs over the gateway port (`HMR_CLIENT_PORT`), WebSocket included.
 
 ## Build
 
-Requirements: Go 1.26+, Bun 1.4 (the Studio build), and on Linux `pkg-config libgtk-4-dev libwebkitgtk-6.0-dev`.
+Requirements: Go 1.26+, Bun 1.4 (the Studio and start screen builds), and for the desktop app on Linux
+`pkg-config libgtk-4-dev libwebkitgtk-6.0-dev`.
 
 ```bash
 git clone --recurse-submodules https://github.com/buildytech/vibechat-desktop
 cd vibechat-desktop
-bash scripts/build-frontend.sh               # bun install + build:desktop in third_party/studio → frontend/dist
-go build -o bin/vibechat ./cmd/vibechat      # the desktop app
-bin/vibechat --set-key                       # paste the Cursor key on stdin, kept in the OS keychain
-bin/vibechat
+bash scripts/build-shell.sh                          # studio build:shell → desktop/shell/dist (the start screen)
+go build -o bin/vibechat ./desktop/cmd/vibechat      # the desktop app
+bash scripts/check-desktop.sh bin/vibechat           # it links no server or local-agent code
+bash scripts/build-frontend.sh                       # studio build:desktop → server/frontend/dist (the Studio)
+go build -o bin/vibechat-server ./server/cmd/vibechat-server
+bash scripts/package-server.sh                       # the server .deb (Linux; fetches the agent runtime)
 ```
 
-Headless Wails mode for tests and the exam (no window, no auth; loopback only, port `VIBECHAT_PORT`, default 18120):
+The old headless Wails mode (`-tags server`, no auth) is gone: tests and checks run against `vibechat-server`
+(`server/cmd/vibechat-server` tests, `scripts/server-smoke.sh`, the Debian 13 jobs in CI).
 
-```bash
-go build -tags server -o bin/vibechat-headless ./cmd/vibechat
-bin/vibechat-headless
-curl -s http://127.0.0.1:18120/runtime/v1/host/capabilities
-```
+## Server / Сервер
 
-The headless build has no auth: never expose it beyond loopback. It stays until the tests and the exam move to
-`vibechat-server`.
-
-## Server (preview) / Сервер (предварительно)
-
-`cmd/vibechat-server` is the same host on the user's own server: plain `net/http`, no Wails. The desktop app
-connects to it over SSH built into the app (Settings → Server); a fresh Debian 13 VPS is set up by the app's wizard
-(Settings → Set up a new server, below).
+`server/cmd/vibechat-server` is the host on the user's own server: plain `net/http`, no Wails. The desktop app
+connects to it over SSH built into the app (the start screen's Connect a server); a fresh Debian 13 VPS is set up by
+the app's wizard (Set up a new server, below).
 
 **Required server OS: Debian 13 "trixie", x86_64** (one Incus container per user, the container also Debian 13).
 Ubuntu and other systems are not supported for now; `vibechat-server doctor` warns on them. CI installs the `.deb`
@@ -163,8 +156,8 @@ in a Debian 13 Incus VM and in an Incus container inside it (`scripts/ci-server-
   one-time ticket (`POST /runtime/v1/auth/ticket`, 60 s) and opens `/auth/session?ticket=…` in the window, which sets
   an HttpOnly SameSite=Strict cookie and moves on to `/` with a meta refresh (a 303 would keep the app's own origin as
   the navigation's initiator, and the Strict cookie would not be sent). `GET /runtime/v1/host/hello` (seam, server version, instance id, protocol,
-  preview port, capabilities) is the only public route. The desktop app's own host has no auth and answers the ticket
-  route with 404.
+  preview port, capabilities) is the only public route. The desktop app answers its own routes only; the ticket
+  route is the server's.
 - The Cursor key: `/var/lib/vibechat/secrets/cursor-key` (0600; a looser file is refused), set in Settings or with
   `vibechat-server set-key` (stdin).
 - `vibechat-server doctor`: system (Debian 13, else a warning), bridge + `cursorsandbox --preflight-only`, Landlock,
@@ -179,13 +172,13 @@ sudo dpkg -i vibechat-server-linux-amd64.deb
 sudo -u vibechat vibechat-server token new     # copy the token (shown once)
 sudo -u vibechat vibechat-server set-key       # or later in Settings
 sudo systemctl start vibechat-server
-# then in the app: Settings → Server (the lines below), or by hand in a browser:
+# then in the app: Connect a server (the lines below), or by hand in a browser:
 ssh -N -L 18120:127.0.0.1:18120 -L 18121:127.0.0.1:18121 you@server
 ```
 
 ### The app's connection / Подключение приложения
 
-Settings → Server in the desktop app (`internal/remote`, the Studio's `GET/PUT/DELETE /runtime/v1/desktop/connection`,
+The start screen's Connect a server, and Settings → Server in the server's Studio (`desktop/internal/remote`, the Studio's `GET/PUT/DELETE /runtime/v1/desktop/connection`,
 answered by the app itself, never by a server):
 
 - SSH is built in (`golang.org/x/crypto/ssh`, no `ssh` binary). The app makes an ed25519 key once and keeps the
@@ -204,44 +197,44 @@ answered by the app itself, never by a server):
   the Bearer token from Go → a local reverse proxy on `http://127.0.0.1:<L>` (L kept across restarts, so the
   Studio's local storage survives) and the preview gateway's port forwarded as the same port on `127.0.0.1` and
   `[::1]` → the window opens `http://127.0.0.1:<L>/auth/session?ticket=…`. An active server is connected again at
-  start; on failure the app stays on this computer and Settings says why.
-- In remote mode the Studio, the projects, the agent and the Cursor key are the server's: a key entered in Settings
-  is sent to the server (`secrets.File`, 0600 there), not kept on the PC. Settings shows the server version and a
+  start (the start screen shows "Connecting…", `connecting` in the answer); on failure the start screen says why.
+- The Studio, the projects, the agent and the Cursor key are the server's: a key entered in Settings is kept on the
+  server (`secrets.File`, 0600 there), never on the PC. Settings shows the server version and a
   warning when it is older than the app (it updates itself daily; `sudo vibechat-server update` to update now).
-  "Use this computer" goes back to the local host; "Forget server" also drops the pin and the token.
+  "Disconnect" goes back to the start screen; "Forget server" also drops the pin and the token.
 - `*.localhost`: previews are `http://<projectId>.preview.localhost:18121/`; `vibechat --probe-localhost` checks that
   the platform's webview resolves and frames such a name (CI on Linux/WebKitGTK, Windows/WebView2 and
   macOS/WKWebView, also from the `.app`). WebView2 and WebKitGTK: yes. macOS: no — its system resolver answers "no
   such host" for `*.localhost` (not App Transport Security: `localhost` and `127.0.0.1` load). So on macOS every
-  preview gets its own `http://127.0.0.1:<P>` from the app (`internal/remote/previewports.go`): the window proxy
+  preview gets its own `http://127.0.0.1:<P>` from the app (`desktop/internal/remote/previewports.go`): the window proxy
   rewrites the preview URLs in the seam's project/ensure/status/grant answers, the per-project proxy talks to the
   gateway as `<id>.preview.localhost:18121` (Origin / Referer mapped too), and the local port 18121 maps Vite's HMR
   socket (`ws://127.0.0.1:18121`, Origin `http://127.0.0.1:<P>`) to its project. `VIBECHAT_PREVIEW_PORTS=1|0`
   forces it on or off.
-- Settings → Server help (Studio, a lazy card, EN — RU): signing in as root with your own SSH key once root password
+- Server help (on the start screen and in Settings → Server, a lazy card, EN — RU): signing in as root with your own SSH key once root password
   login is off (key paths on Windows / macOS / Linux, `ssh-copy-id` or the PowerShell line, the provider's web console
   as the way back; the app's tunnel key cannot sign in) and backups of `/var/lib/vibechat` to an S3-compatible bucket
   with restic (a 0600 env file, `restic init`, a daily systemd service + timer with `forget --prune`, `restic
   snapshots`, restore with the server stopped). Commands: `third_party/studio/apps/studio/src/server-help.ts`.
-- Tests: `internal/remote` (an in-process SSH server with permitopen: transport, ticket flow, SSE, preview forward,
+- Tests: `desktop/internal/remote` (an in-process SSH server with permitopen: transport, ticket flow, SSE, preview forward,
   reconnect, TOFU and strict pinning, keychain mock, problems) and the e2e `scripts/ci-remote-e2e.sh` (CI, job
   `server-debian`): a real sshd and the `.deb` in the Debian 13 VM, the tunnel user from the same lines Settings shows,
-  `go test -tags e2e -run TestE2E ./internal/remote` from the runner.
+  `go test -tags e2e -run TestE2E ./desktop/internal/remote` from the runner.
 
-The agent needs the runtime next to the binary: `go run ./cmd/fetch-bridge -out bin/bridge` downloads the
-cursor-sdk-bridge build and the SDK sandbox helper pinned in `bridge.lock.json` and verifies their SHA-256 / sha512.
-On x64 (Linux, Windows, Intel macOS) the upstream bridge needs AVX2 (Bun's default runtime: `0xC000001D` /
+The server's agent needs the runtime next to the binary: `go run ./server/cmd/fetch-bridge -out bin/bridge` downloads
+the cursor-sdk-bridge build and the SDK sandbox helper pinned in `server/bridge.lock.json` and verifies their SHA-256 / sha512.
+On x64 the upstream bridge needs AVX2 (Bun's default runtime: `0xC000001D` /
 SIGILL on older CPUs), so fetch-bridge takes the JavaScript bundle out of the pinned binary and compiles it again on
 the pinned Bun **baseline** runtime of the same version (`baselineRuntime` in the lock; SSE4.2, no AVX). `go run
-./cmd/fetch-bridge -verify bin/bridge` checks a bridge folder (manifest `runtime: bun-*-baseline`, machine code equal
+./server/cmd/fetch-bridge -verify bin/bridge` checks a bridge folder (manifest `runtime: bun-*-baseline`, machine code equal
 to the pinned baseline Bun); `scripts/bridge-qemu-smoke.sh <bridge dir>` runs it under QEMU `-cpu Nehalem-v2` until
 ready (CI does both). An early bridge exit is logged with its decoded exit code (e.g. `0xC000001D
 STATUS_ILLEGAL_INSTRUCTION`) and the last output lines.
-Without it (or without a working sandbox) the app runs but the agent stays off.
+Without it (or without a working sandbox) the server runs but the agent stays off.
 
 ### Setup wizard / Мастер настройки
 
-Settings → Set up a new server (in local mode; `internal/provision`, `internal/remote/provision.go`, the Studio's
+The start screen's Set up a new server (`desktop/internal/provision`, `desktop/internal/remote/provision.go`, the Studio's
 `GET/POST /runtime/v1/desktop/provision`, answered by the app itself). You type the VPS address and the root password
 once; the password lives only in memory for this run (zeroed afterwards), never in a file, the log or the webview.
 Over SSH (host key pinned on first use, strictly afterwards) the app runs ten steps; each one is check → apply →
@@ -254,7 +247,7 @@ check, so a second run skips what is done (`/var/lib/vibechat-provision/state.js
    15GiB on the btrfs pool `vibechat`, `security.nesting=true`, proxy devices `127.0.0.1:18120/18121` on the host → the container),
    unprivileged `images:debian/13` container `vibechat-owner`;
 5. server — the release `.deb` and `SHA256SUMS` downloaded on the host, `sha256sum -c --strict`, pushed and installed in
-   the container; Bun (pinned baseline build, sha256 from `bridge.lock.json`) for the user `vibechat`;
+   the container; Bun (pinned baseline build, sha256 from `server/bridge.lock.json`) for the user `vibechat`;
 6. egress — the allowlist (below);
 7. token — `vibechat-server token new` in the container; the token goes from stdout straight into the app's keychain
    (`SERVER_HOST_TOKEN`), never printed or logged; a rerun checks the stored token with `Authorization: Bearer` sent on
@@ -288,35 +281,42 @@ the host's dnsmasq (a possible channel for small leaks); IPv6 is off on the brid
 server step: `apt` in the container needs `deb.debian.org`, which is blocked afterwards (server updates come from
 GitHub releases).
 
-Tests: `internal/provision` (every script through `bash -n`, a fake host: each step, idempotency, continuing after a
+Tests: `desktop/internal/provision` (every script through `bash -n`, a fake host: each step, idempotency, continuing after a
 failure, refusal of other systems, the token only to the keychain, lockdown waits for the confirmation, the egress
 script with stub `incus`/`getent`) and the e2e `scripts/ci-provision-e2e.sh` (CI job `provision-debian`): a Debian 13
 Incus VM with sshd and a random root password, the wizard via `go test -tags e2e -run TestProvisionE2E
-./internal/remote`: run 1 without the confirmation → `not_confirmed`, password refused, back after the rollback; run 2
+./desktop/internal/remote`: run 1 without the confirmation → `not_confirmed`, password refused, back after the rollback; run 2
 skips done steps, locks down, connects and signs in; run 3 → `auth`; then limits, unprivileged id map, ACL (allowed:
 npm, Cursor, Bun, GitHub; blocked: example.com, 1.1.1.1, deb.debian.org, plain http), `sshd -T`, the tunnel user.
 
 ## Installers
 
-`bash scripts/package.sh` (after `scripts/build-frontend.sh`) builds the unsigned installer of the current OS into
-`dist/`, with the agent runtime inside, and leaves the bare executable with `bin/bridge/` next to it:
+`bash scripts/package.sh` (after `scripts/build-shell.sh`) builds the unsigned installer of the current OS into
+`dist/` and leaves the bare executable in `bin/`; the app carries no agent runtime:
 
-| OS | Installer | Runtime location |
-|---|---|---|
-| Linux | `vibechat_<version>_amd64.deb` | `/usr/lib/vibechat/bridge` |
-| Windows | `vibechat-amd64-installer.exe` (NSIS) | `<install dir>\bridge` |
-| macOS | `BuildY-VibeChat.dmg` (ad-hoc signed `.app`; volume «BuildY VibeChat») | `Contents/Resources/bridge` |
+| OS | Installer |
+|---|---|
+| Linux | `vibechat_<version>_amd64.deb` (`/usr/bin/vibechat`) |
+| Windows | `vibechat-amd64-installer.exe` (NSIS; removes the `bridge\` folder of an older install) |
+| macOS | `BuildY-VibeChat.dmg` (ad-hoc signed `.app`; volume «BuildY VibeChat») |
 
 It also writes the portable zip of that OS: `vibechat-desktop-linux-x64.zip`, `vibechat-desktop-windows-x64.zip`,
-`vibechat-desktop-macos-arm64.zip` (Apple Silicon only). CI uploads `vibechat-installer-<os>` (installer + zip) and
-`vibechat-<os>` (the bare executable + `bridge/`); a pushed `v*` tag also publishes a GitHub Release with the three
-zips and the installers under these stable names.
+`vibechat-desktop-macos-arm64.zip` (Apple Silicon only). `bash scripts/package-server.sh` (Linux, after
+`scripts/build-frontend.sh`) writes `vibechat-server-linux-amd64.deb` with the agent runtime. CI uploads
+`vibechat-installer-<os>`, `vibechat-<os>` (the bare executable) and `vibechat-server`; a pushed `v*` tag also
+publishes a GitHub Release with the zips, the installers, the server `.deb` and `SHA256SUMS` under these stable
+names.
 
 ## Tests and the gate
 
-`bash scripts/gate.sh` before every push to `main` (no `--force`, no `--no-verify`): gofmt, `go vet`, unit tests, the
-host seam contract test against the pinned `host-seam.json`, and the headless build. CI (`.github/workflows/ci.yml`)
-builds the Studio, runs the tests and builds the desktop app and unsigned installers on Linux, macOS and Windows.
+`bash scripts/gate.sh` before every push to `main` (no `--force`, no `--no-verify`): gofmt, `go vet`, all unit tests,
+the host seam contract tests (server and desktop sides) against the pinned `host-seam.json`, the server build, the
+desktop build when the GUI libraries are there, and `scripts/check-desktop.sh`. CI (`.github/workflows/ci.yml`): job
+`build` (the desktop app on Linux, macOS and Windows: start screen, tests, build, no-local-agent check on the binary
+and the shipped zip, installers), job `server` (Studio, server tests, templates install e2e with Bun 1.3.3 and the
+current one, the agent runtime on the Bun baseline build and under QEMU without AVX2, the server `.deb`), jobs
+`server-debian` and `provision-debian` (Debian 13 Incus VMs: install, connection e2e, the setup wizard) and
+`release` (tags only).
 
 ## License
 
