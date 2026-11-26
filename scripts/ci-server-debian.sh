@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # CI (GitHub ubuntu runner with KVM): the server .deb on Debian 13, the only supported server OS.
 #   1. a Debian 13 Incus VM (real Debian kernel, systemd): scripts/server-smoke.sh, sandbox preflight required;
-#   2. inside that VM, an Incus container like a user's server (scripts/incus-container-smoke.sh).
+#   2. inside that VM, an Incus container like a user's server (scripts/incus-container-smoke.sh), sandbox required.
 # Usage: ci-server-debian.sh <deb>
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -24,9 +24,5 @@ echo "::group::Debian 13 VM"
 sudo incus exec "$vm" -- bash /root/server-smoke.sh /root/vibechat-server.deb --require-sandbox
 echo "::endgroup::"
 echo "::group::Incus container in the Debian 13 VM"
-set +e
 sudo incus exec "$vm" -- bash /root/incus-container-smoke.sh /root/vibechat-server.deb /root/server-smoke.sh --require-sandbox
-c=$?
-set -e
 echo "::endgroup::"
-[ "$c" = 0 ] || echo "::warning::server smoke in an Incus container failed (exit $c); see the group above"
