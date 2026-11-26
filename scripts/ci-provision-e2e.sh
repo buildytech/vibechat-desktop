@@ -61,6 +61,11 @@ fail() { echo "ci-provision-e2e: $*" >&2; exit 1; }
 [ "$(ct cat /sys/fs/cgroup/memory.max)" = 4294967296 ] || fail "limits.memory: $(ct cat /sys/fs/cgroup/memory.max)"
 expanded="$(in_vm incus config show "$c" --expanded)"
 grep -q 'size: 15GiB' <<<"$expanded" || fail "root size"
+grep -q 'pool: vibechat' <<<"$expanded" || fail "root pool"
+[ "$(in_vm incus storage show vibechat | awk '/^driver:/ {print $2}')" = btrfs ] || fail "pool driver"
+# The quota is enforced, not only configured: 16 GiB do not fit into the 15 GiB root.
+if ct fallocate -l 16G /var/tmp/vibechat-quota 2>/dev/null; then ct rm -f /var/tmp/vibechat-quota; fail "root size is not enforced"; fi
+ct rm -f /var/tmp/vibechat-quota
 grep -q 'security.nesting: "true"' <<<"$expanded" || fail "security.nesting"
 ! grep -q 'security.privileged: "true"' <<<"$expanded" || fail "a privileged container"
 [ "$(ct awk 'NR == 1 {print $2}' /proc/self/uid_map)" != 0 ] || fail "root in the container is root on the host"

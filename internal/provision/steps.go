@@ -25,6 +25,7 @@ var (
 const (
 	Network      = "vibechatbr0"
 	Profile      = "vibechat"
+	Pool         = "vibechat"
 	ACL          = "vibechat-egress"
 	TunnelUser   = "vibechat-tunnel"
 	StateDir     = "/var/lib/vibechat-provision"
@@ -92,7 +93,7 @@ func sha(s string) string {
 }
 
 func (w *wizard) vars(extra map[string]string) map[string]string {
-	v := map[string]string{"C": w.cfg.Container, "NET": Network, "PROFILE": Profile, "ACL": ACL, "STATE": StateDir}
+	v := map[string]string{"C": w.cfg.Container, "NET": Network, "PROFILE": Profile, "POOL": Pool, "ACL": ACL, "STATE": StateDir}
 	for k, x := range extra {
 		v[k] = x
 	}
@@ -140,7 +141,7 @@ arch="$(dpkg --print-architecture)"
 mem="$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)"
 [ "$mem" -ge 1800 ] || refuse "at least 2 GiB of memory is required, this server has $mem MiB"
 disk="$(df -Pm /var/lib | awk 'NR == 2 {print $4}')"
-[ "$disk" -ge 8192 ] || refuse "at least 8 GiB free on /var/lib is required, this server has $disk MiB"
+[ "$disk" -ge 18432 ] || refuse "at least 18 GiB free on /var/lib is required (the container's 15 GiB disk lives in an 18 GiB pool file), this server has $disk MiB"
 echo "preflight: $PRETTY_NAME, $arch, $mem MiB memory, $disk MiB free"
 `
 
@@ -167,14 +168,14 @@ func lastLine(b []byte) string {
 // ---- incus
 
 const incusCheck = `
-for c in incus curl unzip sha256sum; do command -v "$c" >/dev/null 2>&1 || exit 3; done
+for c in incus curl unzip sha256sum mkfs.btrfs; do command -v "$c" >/dev/null 2>&1 || exit 3; done
 incus storage list -f csv 2>/dev/null | grep -q . || exit 3
 incus profile device get default root pool >/dev/null 2>&1 || exit 3
 `
 
 const incusApply = `
 apt-get update -qq
-apt-get install -y -qq incus curl ca-certificates unzip >/dev/null
+apt-get install -y -qq incus curl ca-certificates unzip btrfs-progs >/dev/null
 systemctl start incus.socket >/dev/null 2>&1 || true
 # --minimal: a local dir pool and incusbr0, no network listener (the app never gets the Incus API).
 incus storage list -f csv | grep -q . || incus admin init --minimal
@@ -189,7 +190,7 @@ p() { incus profile get "$PROFILE" "$1" 2>/dev/null; }
 d() { incus profile device get "$PROFILE" "$1" "$2" 2>/dev/null; }
 [ "$(p limits.cpu)" = 2 ] && [ "$(p limits.memory)" = 4GiB ] && [ "$(p security.nesting)" = true ] || exit 3
 [ "$(p security.privileged)" != true ] || exit 3
-[ "$(d root size)" = 15GiB ] && [ "$(d root path)" = / ] && [ "$(d eth0 network)" = "$NET" ] || exit 3
+[ "$(d root size)" = 15GiB ] && [ "$(d root pool)" = "$POOL" ] && [ "$(d root path)" = / ] && [ "$(d eth0 network)" = "$NET" ] || exit 3
 [ "$(d api listen)" = tcp:127.0.0.1:18120 ] && [ "$(d api connect)" = tcp:127.0.0.1:18120 ] || exit 3
 [ "$(d preview listen)" = tcp:127.0.0.1:18121 ] && [ "$(d preview connect)" = tcp:127.0.0.1:18121 ] || exit 3
 incus info "$C" >/dev/null 2>&1 || exit 3
@@ -199,7 +200,8 @@ incus config show "$C" | grep -qx -- "- $PROFILE" || exit 3
 `
 
 const containerApply = `
-pool="$(incus profile device get default root pool)"
+# A dir pool (incus admin init --minimal) cannot enforce size=15GiB; a loop-file btrfs pool can (qgroups).
+incus storage show "$POOL" >/dev/null 2>&1 || incus storage create "$POOL" btrfs size=18GiB
 incus network show "$NET" >/dev/null 2>&1 || incus network create "$NET" ipv4.address=auto ipv4.nat=true ipv6.address=none
 incus network set "$NET" ipv4.nat=true ipv6.address=none
 incus profile show "$PROFILE" >/dev/null 2>&1 || incus profile create "$PROFILE"
@@ -214,7 +216,7 @@ dev() {
 		incus profile device add "$PROFILE" "$name" "$type" "$@"
 	fi
 }
-dev root disk path=/ pool="$pool" size=15GiB
+dev root disk path=/ pool="$POOL" size=15GiB
 dev eth0 nic network="$NET" name=eth0
 # The host's loopback ports into the container's loopback (sshd's permitopen for the tunnel user).
 dev api proxy listen=tcp:127.0.0.1:18120 connect=tcp:127.0.0.1:18120 bind=host

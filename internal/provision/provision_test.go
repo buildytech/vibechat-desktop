@@ -311,7 +311,7 @@ func TestScriptsSayWhatTheArchitectureSays(t *testing.T) {
 	}
 	has("preflight:check", `"${ID:-}" = debian`, `"${VERSION_ID:-}" = 13`, "amd64")
 	has("incus:apply", "apt-get install -y -qq incus", "incus admin init --minimal")
-	has("container:apply", "limits.cpu=2 limits.memory=4GiB security.nesting=true", "size=15GiB",
+	has("container:apply", "limits.cpu=2 limits.memory=4GiB security.nesting=true", "size=15GiB", "btrfs size=18GiB",
 		"listen=tcp:127.0.0.1:18120 connect=tcp:127.0.0.1:18120 bind=host", "listen=tcp:127.0.0.1:18121 connect=tcp:127.0.0.1:18121 bind=host",
 		"images:debian/13", "ipv6.address=none", "security.privileged")
 	has("server:apply", "sha256sum -c --strict --quiet want", BunSHA256, "apt-get install -y -qq --reinstall /root/vibechat-server.deb")
