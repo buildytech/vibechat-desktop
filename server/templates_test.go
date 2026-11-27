@@ -15,6 +15,17 @@ func TestTemplatesEmbedded(t *testing.T) {
 	ids := map[string]bool{}
 	for _, p := range ts {
 		ids[p.ID] = true
+		if p.ID == "empty" {
+			if !p.Enabled || len(p.Install) != 0 || len(p.Dev) != 0 || len(p.Build) != 0 {
+				t.Errorf("empty: want an enabled blank profile, got %+v", p)
+			}
+			for _, f := range []string{"package.json", "index.html", "vite.config.ts", ".gitkeep"} {
+				if _, err := fs.Stat(p.Files, f); err == nil && f != ".gitkeep" {
+					t.Errorf("empty: %s should not be copied into a project (present in the embed: %v)", f, err)
+				}
+			}
+			continue
+		}
 		for _, f := range []string{"package.json", "bun.lock", "AGENTS.md", "vite.config.ts", "index.html", "LICENSE"} {
 			if _, err := fs.Stat(p.Files, f); err != nil {
 				t.Errorf("%s: %s missing", p.ID, f)
@@ -66,12 +77,13 @@ func TestTemplatesManifest(t *testing.T) {
 		"r/templates/a/package.json": {Data: []byte("{}")},
 		"r/templates/b/package.json": {Data: []byte("{}")},
 	}
-	ok := `{"schemaVersion":1,"templates":[{"id":"a","dir":"templates/a","name":"A","runner":"vite-bun","aliases":["old-a"]},{"id":"b","dir":"templates/b","name":"B","runner":"next-pnpm"}]}`
+	ok := `{"schemaVersion":1,"templates":[{"id":"a","dir":"templates/a","name":"A","runner":"vite-bun","aliases":["old-a"]},{"id":"b","dir":"templates/b","name":"B","runner":"next-pnpm"},{"id":"empty","dir":"templates/empty","name":"Empty","runner":"none"}]}`
+	files["r/templates/empty/.gitkeep"] = &fstest.MapFile{Data: []byte{}}
 	ts, err := templatesFrom([]byte(ok), files, "r")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ts) != 2 || !ts[0].Enabled || !ts[0].Is("old-a") || ts[1].Enabled || len(ts[1].Dev) != 0 {
+	if len(ts) != 3 || !ts[0].Enabled || !ts[0].Is("old-a") || ts[1].Enabled || len(ts[1].Dev) != 0 || !ts[2].Enabled || len(ts[2].Install) != 0 || len(ts[2].Dev) != 0 {
 		t.Fatalf("profiles: %+v", ts)
 	}
 	for name, bad := range map[string]string{

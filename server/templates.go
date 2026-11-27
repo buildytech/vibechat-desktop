@@ -40,6 +40,8 @@ func runners() map[string]templates.Profile {
 	viteEnv := map[string]string{"HMR_CLIENT_PORT": "{hmrPort}", "HMR_PROTOCOL": "ws", "BROWSER": "none"}
 	return map[string]templates.Profile{
 		"vite-bun": {Install: []string{"bun", "install", "--ignore-scripts"}, Dev: viteDev, DevEnv: viteEnv, Build: []string{"bun", "run", "build"}},
+		// none: a blank workspace (no project files). Enabled, but install and the dev server do not run.
+		"none": {},
 	}
 }
 
@@ -80,11 +82,16 @@ func templatesFrom(raw []byte, files fs.FS, root string) ([]templates.Profile, e
 			seen[id] = true
 		}
 		if _, err := fs.Stat(files, root+"/"+t.Dir+"/package.json"); err != nil {
-			return nil, fmt.Errorf("templates.json: %s: %s/package.json missing", t.ID, t.Dir)
+			if t.Runner != "none" {
+				return nil, fmt.Errorf("templates.json: %s: %s/package.json missing", t.ID, t.Dir)
+			}
+		} else if t.Runner == "none" {
+			return nil, fmt.Errorf("templates.json: %s: runner none must not ship package.json", t.ID)
 		}
 		p := templates.Profile{ID: t.ID, Name: t.Name, Stack: t.Stack, Description: t.Description, Aliases: t.Aliases, Files: sub(files, root+"/"+t.Dir)}
 		if r, ok := run[t.Runner]; ok {
-			p.Enabled, p.Install, p.Dev, p.DevEnv, p.Build = true, r.Install, r.Dev, r.DevEnv, r.Build
+			p.Enabled = true
+			p.Install, p.Dev, p.DevEnv, p.Build = r.Install, r.Dev, r.DevEnv, r.Build
 		}
 		out = append(out, p)
 	}

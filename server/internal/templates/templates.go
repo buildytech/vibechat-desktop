@@ -58,12 +58,12 @@ func Expand(xs []string, port, hmrPort int) []string {
 }
 
 // skip are template paths never copied into a project.
-var skip = map[string]bool{"node_modules": true, "dist": true, ".git": true, "coverage": true}
+var skip = map[string]bool{"node_modules": true, "dist": true, ".git": true, "coverage": true, ".gitkeep": true}
 
 // gitignore lines every project gets.
 const gitignore = "node_modules/\ndist/\ncoverage/\n.env\n*.log\n.vite/\n"
 
-// Scaffold copies p into dst (which must not exist), adds a .gitignore and commits it as the project's first commit.
+// Scaffold copies p into dst (which must not exist) and commits it as the project's first commit. Starters also get a .gitignore; a blank template (no package.json) stays at zero files, with an empty commit.
 func Scaffold(ctx context.Context, p Profile, dst string) error {
 	if _, err := os.Stat(dst); err == nil {
 		return fmt.Errorf("%s already exists", dst)
@@ -78,8 +78,11 @@ func Scaffold(ctx context.Context, p Profile, dst string) error {
 		if name == "." {
 			return nil
 		}
-		if skip[path.Base(name)] && d.IsDir() {
-			return fs.SkipDir
+		if skip[path.Base(name)] {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 		target := filepath.Join(dst, filepath.FromSlash(name))
 		if d.IsDir() {
@@ -98,11 +101,14 @@ func Scaffold(ctx context.Context, p Profile, dst string) error {
 	if err != nil {
 		return err
 	}
-	gi := filepath.Join(dst, ".gitignore")
-	existing, _ := os.ReadFile(gi)
-	if !strings.Contains(string(existing), "node_modules") {
-		if err := os.WriteFile(gi, append(existing, []byte(gitignore)...), 0o644); err != nil {
-			return err
+	// A blank workspace (runner none / no project files) stays at zero files: no .gitignore either.
+	if _, err := os.Stat(filepath.Join(dst, "package.json")); err == nil {
+		gi := filepath.Join(dst, ".gitignore")
+		existing, _ := os.ReadFile(gi)
+		if !strings.Contains(string(existing), "node_modules") {
+			if err := os.WriteFile(gi, append(existing, []byte(gitignore)...), 0o644); err != nil {
+				return err
+			}
 		}
 	}
 	return gitx.InitCommit(ctx, dst, "Project from template "+p.ID)

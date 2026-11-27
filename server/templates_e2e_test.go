@@ -33,6 +33,12 @@ func TestTemplatesInstallE2E(t *testing.T) {
 			if err := templates.Scaffold(ctx, tpl, dir); err != nil {
 				t.Fatal(err)
 			}
+			if len(tpl.Install) == 0 {
+				if _, err := os.Stat(filepath.Join(dir, "package.json")); err == nil {
+					t.Fatal("blank template should have no package.json")
+				}
+				return
+			}
 			if err := host.InstallDeps(ctx, dir, tpl, func(l string) { t.Log(l) }); err != nil {
 				t.Fatal(err)
 			}

@@ -57,6 +57,10 @@ func (h *Host) ensurePreview(w http.ResponseWriter, r *http.Request, prm Params)
 		WriteError(w, http.StatusConflict, "This project's template has no preview")
 		return
 	}
+	if len(tpl.Dev) == 0 {
+		WriteError(w, http.StatusConflict, "This project has no files yet. Import a ZIP or add files, then start the preview.")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
 	if err := h.waitSetup(ctx, p); err != nil {

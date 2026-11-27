@@ -35,12 +35,21 @@ func Run(ctx context.Context, dir string, args ...string) (string, error) {
 // Available reports whether git is on PATH.
 func Available() bool { _, err := exec.LookPath("git"); return err == nil }
 
-// InitCommit makes dir a repository with everything committed on main.
+// InitCommit makes dir a repository with everything committed on main. A folder with no files (the empty
+// workspace) still gets an empty commit, so worktrees have a tip to branch from.
 func InitCommit(ctx context.Context, dir, msg string) error {
 	if _, err := Run(ctx, dir, "init", "-q", "-b", "main"); err != nil {
 		return err
 	}
-	return CommitAll(ctx, dir, msg)
+	if _, err := Run(ctx, dir, "add", "-A"); err != nil {
+		return err
+	}
+	if st, _ := Run(ctx, dir, "status", "--porcelain"); st == "" {
+		_, err := Run(ctx, dir, "commit", "-q", "--allow-empty", "-m", msg)
+		return err
+	}
+	_, err := Run(ctx, dir, "commit", "-q", "-m", msg)
+	return err
 }
 
 // CommitAll stages everything and commits when something changed; it answers whether a commit was made.
