@@ -71,11 +71,11 @@ grep -q 'security.nesting: "true"' <<<"$expanded" || fail "security.nesting"
 [ "$(ct awk 'NR == 1 {print $2}' /proc/self/uid_map)" != 0 ] || fail "root in the container is root on the host"
 echo "limits: 2 CPU, 4 GiB, 15 GiB, nesting, unprivileged: ok"
 reach() { ct curl -sS -o /dev/null -m 20 "$1"; }
-for u in https://registry.npmjs.org/ https://api.cursor.com/ https://api2.cursor.sh/ https://agent.api5.cursor.sh/ https://bun.sh/ https://github.com/; do
+for u in https://registry.npmjs.org/ https://api.cursor.com/ https://api2.cursor.sh/ https://agent.api5.cursor.sh/ https://bun.sh/ https://github.com/ https://deb.debian.org/; do
 	reach "$u" || fail "egress: $u is blocked"
 	echo "egress: $u allowed"
 done
-for u in https://example.com/ https://1.1.1.1/ https://deb.debian.org/ http://registry.npmjs.org/; do
+for u in https://example.com/ https://1.1.1.1/ http://deb.debian.org/ http://registry.npmjs.org/; do
 	if reach "$u" 2>/dev/null; then fail "egress: $u is reachable"; fi
 	echo "egress: $u blocked"
 done
@@ -96,6 +96,15 @@ doc="$(ct runuser -u vibechat -- env HOME=/var/lib/vibechat vibechat-server doct
 echo "$doc"
 grep -qE '^ok +bun +/var/lib/vibechat/\.bun/bin/bun ' <<<"$doc" || fail "doctor: bun"
 grep -qE '^ok +sandbox .*\(bridge release ' <<<"$doc" || fail "doctor: sandbox or the bridge release stamp"
+grep -qE '^ok +tools +.* bwrap ' <<<"$doc" || fail "doctor: project tools are not isolated from the data folder"
+[ "$(ct readlink /var/lib/vibechat/.bun/bin/node)" = bun ] || fail "no node → bun in the container"
+ct dpkg-query -W -f '${Status}' unattended-upgrades | grep -q 'install ok installed' || fail "no unattended-upgrades in the container"
+[ "$(in_vm incus config get "$c" snapshots.schedule)" = @daily ] && [ "$(in_vm incus config get "$c" snapshots.expiry)" = 7d ] || fail "snapshot schedule"
+[ -n "$(in_vm swapon --noheadings --show=NAME)" ] || fail "no swap on the host"
+in_vm systemctl is-active -q vibechat-host-firewall.service || fail "the host firewall is not active"
+in_vm nft list table inet vibechat_host | grep -q 'jump wan' || fail "the host firewall table"
+if in_vm ss -Hlnu 'sport = :5355' | grep -q .; then fail "LLMNR still listens"; fi
+echo "host: firewall, no LLMNR, swap, daily snapshots; container: node, unattended-upgrades, isolated project tools: ok"
 in_vm systemctl is-enabled -q vibechat-egress.timer || fail "vibechat-egress.timer"
 in_vm systemctl start vibechat-egress.service || fail "the egress refresh fails"
 reach https://registry.npmjs.org/ || fail "egress after a refresh"

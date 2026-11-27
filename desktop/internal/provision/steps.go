@@ -23,17 +23,21 @@ var (
 
 // Fixed names on the host and in the container.
 const (
-	Network      = "vibechatbr0"
-	Profile      = "vibechat"
-	Pool         = "vibechat"
-	ACL          = "vibechat-egress"
-	TunnelUser   = "vibechat-tunnel"
-	StateDir     = "/var/lib/vibechat-provision"
-	SSHDropIn    = "/etc/ssh/sshd_config.d/00-vibechat.conf"
-	RollbackUnit = "vibechat-sshd-rollback"
-	Snapshot     = "provisioned"
-	APIPort      = 18120
-	PreviewPort  = 18121
+	Network        = "vibechatbr0"
+	Profile        = "vibechat"
+	Pool           = "vibechat"
+	ACL            = "vibechat-egress"
+	TunnelUser     = "vibechat-tunnel"
+	StateDir       = "/var/lib/vibechat-provision"
+	SSHDropIn      = "/etc/ssh/sshd_config.d/00-vibechat.conf"
+	RollbackUnit   = "vibechat-sshd-rollback"
+	FirewallUnit   = "vibechat-host-firewall"
+	FirewallFile   = "/etc/vibechat/host-firewall.nft"
+	FirewallTable  = "vibechat_host"
+	ResolvedDropIn = "/etc/systemd/resolved.conf.d/00-vibechat.conf"
+	Snapshot       = "provisioned"
+	APIPort        = 18120
+	PreviewPort    = 18121
 )
 
 // Bun for previews in the container: the runtime pinned in bridge.lock.json (baselineRuntime, linux-x64).
@@ -43,17 +47,33 @@ const (
 	BunSHA256  = "104d4d037f4b35e10215c0507e1779691f39c57bd91ddeefe11cad781e3fc4b9"
 )
 
-// Limits of the user's container.
+// Limits of the user's container: at most LimitCPU CPUs and LimitMemory, and on a smaller host min(LimitCPU, nproc)
+// CPUs and 75% of its memory (limitsSh); a host without swap gets a SwapSize swap file first.
 const (
 	LimitCPU    = "2"
 	LimitMemory = "4GiB"
 	LimitDisk   = "15GiB"
+	SwapSize    = "2G"
+	SwapFile    = "/swapfile"
+)
+
+// limitsSh computes the container's limits on the host: $cpu and $mem.
+const limitsSh = `
+cpu="$(nproc)"
+[ "$cpu" -le 2 ] || cpu=2
+mem="$(awk '/^MemTotal:/ {m = int($2 / 1024 * 3 / 4); if (m >= 4096) print "4GiB"; else print m "MiB"}' /proc/meminfo)"
+`
+
+// Snapshots of the container: daily, kept a week (the "provisioned" one from the verify step stays).
+const (
+	SnapshotSchedule = "@daily"
+	SnapshotExpiry   = "7d"
 )
 
 // DefaultDomains is the egress allowlist: Cursor (api.cursor.com, the SDK's public API the bridge calls for Me,
 // ListModels and agent create, which is not on Cursor's network page; then the agent's API hosts from
 // cursor.com/docs/enterprise/network-configuration; no wildcards), npm (registry), Bun and GitHub (Bun releases, git over https, vibechat-server
-// updates from GitHub releases). TCP 443 only.
+// updates from GitHub releases) and Debian (the container's security updates over HTTPS). TCP 443 only.
 var DefaultDomains = []string{
 	// Cursor
 	"api.cursor.com",
@@ -63,6 +83,8 @@ var DefaultDomains = []string{
 	"authenticate.cursor.sh", "authentication.cursor.sh", "prod.authentication.cursor.sh",
 	// npm
 	"registry.npmjs.org",
+	// Debian (the container's apt over HTTPS: security updates)
+	"deb.debian.org",
 	// Bun
 	"bun.sh",
 	// GitHub (Bun releases, git, vibechat-server updates)
@@ -106,7 +128,7 @@ func (w *wizard) steps() []step {
 	return []step{
 		{id: StepPreflight, check: w.preflight},
 		{id: StepIncus, check: w.checkOf(StepIncus, incusCheck, nil), apply: w.applySubsOf(StepIncus, incusApply, nil)},
-		{id: StepContainer, check: w.checkOf(StepContainer, containerCheck, nil), apply: w.applySubsOf(StepContainer, containerApply, nil)},
+		{id: StepContainer, check: w.checkOf(StepContainer, limitsSh+containerCheck, containerVars()), apply: w.applySubsOf(StepContainer, limitsSh+containerApply, containerVars())},
 		{id: StepServer, check: w.checkOf(StepServer, serverCheck, w.serverVars()), apply: w.applyOf(StepServer, serverApply, w.serverVars())},
 		{id: StepEgress, check: w.checkOf(StepEgress, egressCheck, w.egressVars()), apply: w.applyOf(StepEgress, egressApply(w.egressFiles()), w.egressVars())},
 		{id: StepToken, check: w.tokenCheck, apply: w.tokenApply},
@@ -140,11 +162,17 @@ refuse() { echo "refuse: $*" >&2; exit 4; }
 arch="$(dpkg --print-architecture)"
 [ "$arch" = amd64 ] || refuse "an amd64 (x86_64) server is required, this one is $arch"
 [ -d /run/systemd/system ] || refuse "systemd is required"
+cpu="$(nproc)"
+[ "$cpu" -ge 1 ] || refuse "no CPU reported by nproc"
 mem="$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)"
 [ "$mem" -ge 1800 ] || refuse "at least 2 GiB of memory is required, this server has $mem MiB"
+need=18432 why="the container's 15 GiB disk lives in an 18 GiB pool file"
+if [ -z "$(swapon --noheadings --show=NAME 2>/dev/null)" ] && [ ! -e /swapfile ]; then
+	need=20480 why="$why, plus a 2 GiB swap file: this server has no swap"
+fi
 disk="$(df -Pm /var/lib | awk 'NR == 2 {print $4}')"
-[ "$disk" -ge 18432 ] || refuse "at least 18 GiB free on /var/lib is required (the container's 15 GiB disk lives in an 18 GiB pool file), this server has $disk MiB"
-echo "preflight: $PRETTY_NAME, $arch, $mem MiB memory, $disk MiB free"
+[ "$disk" -ge "$need" ] || refuse "at least $((need / 1024)) GiB free on /var/lib is required ($why), this server has $disk MiB"
+echo "preflight: $PRETTY_NAME, $arch, $cpu CPU, $mem MiB memory, $disk MiB free"
 `
 
 func (w *wizard) preflight(ctx context.Context) (bool, error) {
@@ -193,7 +221,10 @@ const containerCheck = `
 [ "$(incus network get "$NET" ipv6.address 2>/dev/null)" = none ] || exit 3
 p() { incus profile get "$PROFILE" "$1" 2>/dev/null; }
 d() { incus profile device get "$PROFILE" "$1" "$2" 2>/dev/null; }
-[ "$(p limits.cpu)" = 2 ] && [ "$(p limits.memory)" = 4GiB ] && [ "$(p security.nesting)" = true ] || exit 3
+[ "$(p limits.cpu)" = "$cpu" ] && [ "$(p limits.memory)" = "$mem" ] && [ "$(p security.nesting)" = true ] || exit 3
+[ -n "$(swapon --noheadings --show=NAME 2>/dev/null)" ] || exit 3
+[ "$(incus config get "$C" snapshots.schedule 2>/dev/null)" = "$SNAP_SCHEDULE" ] || exit 3
+[ "$(incus config get "$C" snapshots.expiry 2>/dev/null)" = "$SNAP_EXPIRY" ] || exit 3
 [ "$(p security.privileged)" != true ] || exit 3
 [ "$(d root size)" = 15GiB ] && [ "$(d root pool)" = "$POOL" ] && [ "$(d root path)" = / ] && [ "$(d eth0 network)" = "$NET" ] || exit 3
 [ "$(d api listen)" = tcp:127.0.0.1:18120 ] && [ "$(d api connect)" = tcp:127.0.0.1:18120 ] || exit 3
@@ -212,8 +243,22 @@ sub bridge
 incus network show "$NET" >/dev/null 2>&1 || incus network create "$NET" ipv4.address=auto ipv4.nat=true ipv6.address=none
 incus network set "$NET" ipv4.nat=true ipv6.address=none
 sub profile
+# A small host (1 CPU, 2 GiB) gets min(2, nproc) CPUs, 75% of its memory and a swap file when it has no swap.
+if [ -z "$(swapon --noheadings --show=NAME 2>/dev/null)" ]; then
+	if [ ! -e "$SWAPFILE" ]; then
+		if [ "$(stat -f -c %T /)" = btrfs ]; then
+			btrfs filesystem mkswapfile --size "$SWAPSIZE" "$SWAPFILE" >/dev/null
+		else
+			fallocate -l "$SWAPSIZE" "$SWAPFILE" 2>/dev/null || dd if=/dev/zero of="$SWAPFILE" bs=1M count=2048 status=none
+			chmod 600 "$SWAPFILE"
+			mkswap "$SWAPFILE" >/dev/null
+		fi
+	fi
+	swapon "$SWAPFILE"
+	grep -q "^$SWAPFILE " /etc/fstab || printf '%s none swap sw 0 0\n' "$SWAPFILE" >> /etc/fstab
+fi
 incus profile show "$PROFILE" >/dev/null 2>&1 || incus profile create "$PROFILE"
-incus profile set "$PROFILE" limits.cpu=2 limits.memory=4GiB security.nesting=true
+incus profile set "$PROFILE" limits.cpu="$cpu" limits.memory="$mem" security.nesting=true
 incus profile unset "$PROFILE" security.privileged >/dev/null 2>&1 || true
 dev() {
 	local name="$1" type="$2"
@@ -232,9 +277,14 @@ dev preview proxy listen=tcp:127.0.0.1:18121 connect=tcp:127.0.0.1:18121 bind=ho
 sub launch-image
 incus info "$C" >/dev/null 2>&1 || incus launch images:debian/13 "$C" -p "$PROFILE"
 [ "$(incus info "$C" | awk '/^Status:/ {print $2}')" = RUNNING ] || incus start "$C"
+incus config set "$C" snapshots.schedule="$SNAP_SCHEDULE" snapshots.expiry="$SNAP_EXPIRY"
 sub wait-dns
 for _ in $(seq 1 90); do incus exec "$C" -- getent hosts deb.debian.org >/dev/null 2>&1 </dev/null && break; sleep 2; done
 `
+
+func containerVars() map[string]string {
+	return map[string]string{"SWAPFILE": SwapFile, "SWAPSIZE": SwapSize, "SNAP_SCHEDULE": SnapshotSchedule, "SNAP_EXPIRY": SnapshotExpiry}
+}
 
 // ---- server
 
@@ -254,6 +304,10 @@ want="$(` + sumsLine + ` | awk '{print $1}')"
 incus exec "$C" -- dpkg-query -W -f '${Status}' vibechat-server 2>/dev/null </dev/null | grep -q 'install ok installed' || exit 3
 for c in curl bwrap; do incus exec "$C" -- sh -c "command -v $c" >/dev/null 2>&1 </dev/null || exit 3; done
 [ "$(incus exec "$C" -- /var/lib/vibechat/.bun/bin/bun --version 2>/dev/null </dev/null)" = "$BUN_VERSION" ] || exit 3
+[ "$(incus exec "$C" -- readlink /var/lib/vibechat/.bun/bin/node 2>/dev/null </dev/null)" = bun ] || exit 3
+incus exec "$C" -- dpkg-query -W -f '${Status}' unattended-upgrades 2>/dev/null </dev/null | grep -q 'install ok installed' || exit 3
+incus exec "$C" -- grep -q 'Unattended-Upgrade "1"' /etc/apt/apt.conf.d/20auto-upgrades </dev/null || exit 3
+if incus exec "$C" -- grep -rqs 'http://deb.debian.org' /etc/apt/sources.list /etc/apt/sources.list.d </dev/null; then exit 3; fi
 `
 
 const serverApply = `
@@ -270,6 +324,10 @@ unzip -q -o "$work/bun.zip" -d "$work/bun"
 ct() { incus exec "$C" -- "$@" </dev/null; }
 ct apt-get update -qq
 ct env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates unzip bubblewrap >/dev/null
+# Debian over HTTPS (the egress allowlist is TCP 443 only), then security updates by themselves.
+ct sh -c 'for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do [ -f "$f" ] && sed -i "s#http://deb.debian.org#https://deb.debian.org#g" "$f"; done; true'
+ct env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unattended-upgrades >/dev/null
+ct sh -c "printf '%s\n' 'APT::Periodic::Update-Package-Lists \"1\";' 'APT::Periodic::Unattended-Upgrade \"1\";' > /etc/apt/apt.conf.d/20auto-upgrades"
 incus file push "$work/vibechat-server-linux-amd64.deb" "$C/root/vibechat-server.deb"
 ct env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --reinstall /root/vibechat-server.deb >/dev/null
 ct rm -f /root/vibechat-server.deb
@@ -277,6 +335,8 @@ ct install -d -o vibechat -g vibechat -m 755 /var/lib/vibechat/.bun /var/lib/vib
 incus file push --mode 0755 "$work/bun/bun-linux-x64-baseline/bun" "$C/var/lib/vibechat/.bun/bin/bun"
 ct chown vibechat:vibechat /var/lib/vibechat/.bun/bin/bun
 ct ln -sfn bun /var/lib/vibechat/.bun/bin/bunx
+# node → bun: the template checks' #!/usr/bin/env node tools (ui8px, ui8kit, svelte-check); the container has no Node.
+ct ln -sfn bun /var/lib/vibechat/.bun/bin/node
 install -d -m 700 "$STATE"
 awk '{print $1}' "$work/want" > "$STATE/server.sha256"
 `
@@ -549,12 +609,68 @@ KbdInteractiveAuthentication no
 PermitRootLogin prohibit-password
 `
 
+// resolvedDropIn turns off LLMNR and mDNS of systemd-resolved (they answer on 0.0.0.0:5355 / 5353).
+const resolvedDropIn = `# VibeChat setup: no LLMNR or mDNS on this server.
+[Resolve]
+LLMNR=no
+MulticastDNS=no
+`
+
+// firewallService loads the inbound filter at boot (its own table: Incus's rules and nftables.service stay as they
+// are; the rollback timer and ExecStop delete only this table).
+const firewallService = `[Unit]
+Description=VibeChat setup: inbound filter of this server (SSH only)
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f ` + FirewallFile + `
+ExecStop=-/usr/sbin/nft delete table inet ` + FirewallTable + `
+
+[Install]
+WantedBy=multi-user.target
+`
+
 func (w *wizard) lockdownVars() map[string]string {
 	return map[string]string{
 		"F": SSHDropIn, "WANT": sha(dropIn), "UNIT": RollbackUnit, "ROOT_KEY": w.cfg.RootKey,
-		"SECS": strconv.Itoa(int(w.cfg.RollbackAfter / time.Second)),
+		"SECS":    strconv.Itoa(int(w.cfg.RollbackAfter / time.Second)),
+		"FW_UNIT": FirewallUnit, "FW_FILE": FirewallFile, "FW_TABLE": FirewallTable, "FW_SERVICE": firewallService,
+		"FW_SERVICE_SHA": sha(firewallService), "RES": ResolvedDropIn, "RES_BODY": resolvedDropIn, "RES_SHA": sha(resolvedDropIn),
 	}
 }
+
+// firewallRules writes $FW_FILE.new: inbound on the internet-facing interfaces (the default routes') only to
+// sshd's ports, ICMP and DHCP answers; established traffic passes; everything else there is dropped. The container
+// bridge, loopback and forwarding are not touched (Incus keeps its own rules). $FW_FILE is compared, then moved.
+const firewallRules = `
+wan="$({ ip -4 route show default; ip -6 route show default; } 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") print $(i + 1)}' | sort -u | sed 's/.*/"&"/' | paste -sd, -)"
+[ -n "$wan" ] || { echo "no default route: cannot tell the internet-facing interface" >&2; exit 1; }
+ports="$(/usr/sbin/sshd -T 2>/dev/null | awk '$1 == "port" {print $2}' | sort -un | paste -sd, -)"
+[ -n "$ports" ] || { echo "sshd -T shows no port" >&2; exit 1; }
+cat > "$FW_FILE.new" <<VIBECHAT_NFT
+# VibeChat setup: inbound filter of this server (vibechat-host-firewall.service). SSH ($ports) only from the
+# internet; the container bridge, loopback and forwarding are not touched.
+table inet $FW_TABLE
+delete table inet $FW_TABLE
+table inet $FW_TABLE {
+	chain input {
+		type filter hook input priority filter; policy accept;
+		iifname { $wan } jump wan
+	}
+	chain wan {
+		ct state established,related accept
+		ct state invalid drop
+		tcp dport { $ports } accept
+		meta l4proto { icmp, ipv6-icmp } accept
+		udp dport { 68, 546 } accept
+		drop
+	}
+}
+VIBECHAT_NFT
+`
 
 const sshdEffective = `
 eff="$(/usr/sbin/sshd -T -C user=root,host=vibechat-check,addr=192.0.2.1 2>/dev/null)"
@@ -565,16 +681,27 @@ done
 
 const lockdownCheck = `
 [ "$(sha256sum "$F" 2>/dev/null | awk '{print $1}')" = "$WANT" ] || exit 3
+command -v nft >/dev/null 2>&1 || exit 3
+[ "$(sha256sum "/etc/systemd/system/$FW_UNIT.service" 2>/dev/null | awk '{print $1}')" = "$FW_SERVICE_SHA" ] || exit 3
+systemctl is-enabled -q "$FW_UNIT.service" && systemctl is-active -q "$FW_UNIT.service" || exit 3
+nft list table inet "$FW_TABLE" >/dev/null 2>&1 || exit 3
+` + firewallRules + `
+cmp -s "$FW_FILE.new" "$FW_FILE" || { rm -f "$FW_FILE.new"; exit 3; }
+rm -f "$FW_FILE.new"
+if systemctl is-active -q systemd-resolved; then
+	[ "$(sha256sum "$RES" 2>/dev/null | awk '{print $1}')" = "$RES_SHA" ] || exit 3
+fi
 if systemctl is-active -q "$UNIT.timer"; then exit 3; fi
 if [ -n "$ROOT_KEY" ]; then grep -qxF "$ROOT_KEY" /root/.ssh/authorized_keys 2>/dev/null || exit 3; fi
 ` + sshdEffective
 
-// lockdownArm: the safety net first. When the app does not confirm, the timer removes the drop-in and reloads sshd.
+// lockdownArm: the safety net first. When the app does not confirm, the timer removes the drop-in, reloads sshd and
+// takes the inbound filter away.
 const lockdownArm = `
 systemctl stop "$UNIT.timer" >/dev/null 2>&1 || true
 systemctl reset-failed "$UNIT.service" "$UNIT.timer" >/dev/null 2>&1 || true
 systemd-run --quiet --unit="$UNIT" --on-active="${SECS}s" --description="VibeChat setup: allow SSH password login again (not confirmed)" \
-	/bin/sh -c "rm -f '$F'; if systemctl is-active -q ssh.service; then systemctl reload ssh.service; fi"
+	/bin/sh -c "rm -f '$F'; if systemctl is-active -q ssh.service; then systemctl reload ssh.service; fi; systemctl disable -q --now '$FW_UNIT.service' 2>/dev/null; nft delete table inet '$FW_TABLE' 2>/dev/null; true"
 systemctl is-active -q "$UNIT.timer"
 `
 
@@ -594,6 +721,22 @@ undo() { rm -f "$F"; systemctl stop "$UNIT.timer" >/dev/null 2>&1 || true; }
 if ! /usr/sbin/sshd -t; then undo; echo "sshd -t refused the configuration; nothing changed" >&2; exit 1; fi
 ( ` + strings.ReplaceAll(strings.TrimSpace(sshdEffective), "exit 3", "exit 5") + ` ) || { undo; echo "another sshd setting wins over $F; nothing changed" >&2; exit 1; }
 if systemctl is-active -q ssh.service; then systemctl reload ssh.service; fi
+# The inbound filter: SSH only (the rollback timer armed above takes it away unless the app's new key login works).
+command -v nft >/dev/null 2>&1 || apt-get install -y -qq nftables >/dev/null
+install -d -m 755 /etc/vibechat
+` + firewallRules + `
+nft -c -f "$FW_FILE.new" || { rm -f "$FW_FILE.new"; echo "nft refused the inbound filter; nothing changed" >&2; exit 1; }
+chmod 644 "$FW_FILE.new" && mv "$FW_FILE.new" "$FW_FILE"
+printf '%s' "$FW_SERVICE" > "/etc/systemd/system/$FW_UNIT.service.tmp" && mv "/etc/systemd/system/$FW_UNIT.service.tmp" "/etc/systemd/system/$FW_UNIT.service"
+systemctl daemon-reload
+systemctl enable -q "$FW_UNIT.service"
+systemctl restart "$FW_UNIT.service"
+# No LLMNR / mDNS answers from systemd-resolved.
+if systemctl is-active -q systemd-resolved; then
+	install -d -m 755 "$(dirname "$RES")"
+	printf '%s' "$RES_BODY" > "$RES.tmp" && mv "$RES.tmp" "$RES"
+	systemctl restart systemd-resolved
+fi
 `
 }
 

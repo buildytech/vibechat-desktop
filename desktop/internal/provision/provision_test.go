@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -311,15 +313,20 @@ func TestScriptsSayWhatTheArchitectureSays(t *testing.T) {
 	}
 	has("preflight:check", `"${ID:-}" = debian`, `"${VERSION_ID:-}" = 13`, "amd64")
 	has("incus:apply", "apt-get install -y -qq incus", "incus admin init --minimal")
-	has("container:apply", "limits.cpu=2 limits.memory=4GiB security.nesting=true", "size=15GiB", "btrfs size=18GiB",
+	has("container:apply", `limits.cpu="$cpu" limits.memory="$mem" security.nesting=true`, "swapon", "SWAPSIZE='2G'",
+		`snapshots.schedule="$SNAP_SCHEDULE" snapshots.expiry="$SNAP_EXPIRY"`, "SNAP_SCHEDULE='@daily'", "SNAP_EXPIRY='7d'", "size=15GiB", "btrfs size=18GiB",
 		"listen=tcp:127.0.0.1:18120 connect=tcp:127.0.0.1:18120 bind=host", "listen=tcp:127.0.0.1:18121 connect=tcp:127.0.0.1:18121 bind=host",
 		"images:debian/13", "ipv6.address=none", "security.privileged")
-	has("server:apply", "sha256sum -c --strict --quiet want", BunSHA256, "apt-get install -y -qq --reinstall /root/vibechat-server.deb")
+	has("server:apply", "sha256sum -c --strict --quiet want", BunSHA256, "apt-get install -y -qq --reinstall /root/vibechat-server.deb",
+		"ln -sfn bun /var/lib/vibechat/.bun/bin/node", "apt-get install -y -qq unattended-upgrades", "https://deb.debian.org")
+	has("preflight:check", "nproc", "need=20480")
 	has("egress:apply", "security.acls.default.egress.action=reject", `destination_port: "443"`, "registry.npmjs.org", "api.cursor.com", "api2.cursor.sh", "bun.sh",
 		"OnUnitActiveSec=10min", "--mode 0644")
 	has("token:apply", "vibechat-server token new 2>/dev/null")
 	has("tunnel:apply", `LINE='restrict,port-forwarding,permitopen="127.0.0.1:18120",permitopen="127.0.0.1:18121" ssh-ed25519 `, "--shell /usr/sbin/nologin")
-	has("lockdown:arm", "systemd-run", `SECS='300'`, `--on-active="${SECS}s"`)
+	has("lockdown:arm", "systemd-run", `SECS='300'`, `--on-active="${SECS}s"`, "nft delete table inet")
+	has("lockdown:apply", "nft -c -f", "jump wan", "tcp dport { $ports } accept", "LLMNR=no", "systemctl enable -q \"$FW_UNIT.service\"")
+	has("lockdown:check", "nft list table inet", "cmp -s")
 	has("lockdown:apply", "PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\n", "/usr/sbin/sshd -t", "me@laptop")
 	if strings.Contains(s["container:apply"], "security.privileged=true") {
 		t.Error("a privileged container")
@@ -386,6 +393,46 @@ func TestDefaults(t *testing.T) {
 	for _, want := range []string{"cursor.sh", "registry.npmjs.org", "bun.sh", "github.com"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("allowlist lacks %s", want)
+		}
+	}
+}
+
+// limitsSh: at most 2 CPUs and 4 GiB, 75% of the memory on a smaller host.
+func TestLimitsFollowTheHost(t *testing.T) {
+	out, err := exec.Command("bash", "-c", "set -eu\n"+limitsSh+`echo "$cpu $mem"`).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := strings.Fields(string(out))
+	if len(f) != 2 || (f[0] != "1" && f[0] != "2") || !regexp.MustCompile(`^([0-9]+MiB|4GiB)$`).MatchString(f[1]) {
+		t.Fatalf("limits %q", out)
+	}
+}
+
+// The inbound filter allows sshd's ports on the default-route interfaces and drops the rest there.
+func TestFirewallRules(t *testing.T) {
+	dir := t.TempDir()
+	stub := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stub("ip", `case "$1" in -4) echo "default via 192.0.2.1 dev eth0 proto dhcp";; -6) echo "default via fe80::1 dev ens3 proto ra";; esac`+"\n")
+	stub("sshd", "printf 'port 22\\nport 2222\\npasswordauthentication no\\n'\n")
+	body := strings.ReplaceAll(firewallRules, "/usr/sbin/sshd", filepath.Join(dir, "sshd"))
+	sc := "set -euo pipefail\nFW_FILE=" + quote(filepath.Join(dir, "fw.nft")) + "\nFW_TABLE=vibechat_host\n" + body
+	cmd := exec.Command("bash", "-c", sc)
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "fw.nft.new"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`iifname { "ens3","eth0" } jump wan`, "tcp dport { 22,2222 } accept", "policy accept;", "ct state established,related accept", "\t\tdrop\n", "delete table inet vibechat_host"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("rules lack %q:\n%s", want, raw)
 		}
 	}
 }
