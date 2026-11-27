@@ -35,12 +35,16 @@ func (h *Host) registerPreview() {
 	h.router.Handle("POST /projects/:id/preview/grant", h.previewGrant)
 }
 
-func (h *Host) noPreview(w http.ResponseWriter) bool {
+func (h *Host) noPreview(w http.ResponseWriter, tool string) bool {
 	if h.opts.Preview == nil {
 		WriteError(w, http.StatusServiceUnavailable, "Live preview is not available in this build")
 		return true
 	}
-	if !h.hasTool("bun") {
+	switch {
+	case tool == "go" && !h.hasTool("go"):
+		WriteError(w, http.StatusServiceUnavailable, "Live preview of a Go project needs Go on the server: run `sudo vibechat-server ensure-go`")
+		return true
+	case tool != "go" && tool != "none" && !h.hasTool("bun"):
 		WriteError(w, http.StatusServiceUnavailable, "Live preview needs Bun (https://bun.sh); install it and restart VibeChat")
 		return true
 	}
@@ -49,12 +53,17 @@ func (h *Host) noPreview(w http.ResponseWriter) bool {
 
 func (h *Host) ensurePreview(w http.ResponseWriter, r *http.Request, prm Params) {
 	p, ok := h.project(w, prm["id"])
-	if !ok || h.noPreview(w) {
+	if !ok {
 		return
 	}
 	tpl, ok := h.template(p.TemplateID)
 	if !ok {
-		WriteError(w, http.StatusConflict, "This project's template has no preview")
+		if !h.noPreview(w, "bun") {
+			WriteError(w, http.StatusConflict, "This project's template has no preview")
+		}
+		return
+	}
+	if h.noPreview(w, tpl.Tool) {
 		return
 	}
 	if len(tpl.Dev) == 0 {
@@ -109,7 +118,7 @@ func (h *Host) previewStatus(w http.ResponseWriter, _ *http.Request, prm Params)
 
 func (h *Host) previewGrant(w http.ResponseWriter, _ *http.Request, prm Params) {
 	p, ok := h.project(w, prm["id"])
-	if !ok || h.noPreview(w) {
+	if !ok || h.noPreview(w, "none") {
 		return
 	}
 	url, exp, err := h.opts.Preview.Grant(p.ID)

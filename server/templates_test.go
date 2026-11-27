@@ -26,6 +26,15 @@ func TestTemplatesEmbedded(t *testing.T) {
 			}
 			continue
 		}
+		if p.Layer != nil {
+			// The Go starter (templates ADR 0004): a pinned layer, fetched on first use; the same commit as BuildY
+			// Chat's registry/templ snapshot.
+			if p.ID != "templ" || p.Runner != "go-templ" || p.Tool != "go" || !p.Enabled || p.Layer.Source.Repo != "fastygo/starter" ||
+				p.Layer.Source.Commit != "cf9d7dbf944c2fc395625e19d7cd3a104d0e667c" || p.Layer.Files["go.sum"] == "" || p.Layer.Files["cmd/site/main.go"] == "" {
+				t.Errorf("templ: unexpected layer profile %+v", p)
+			}
+			continue
+		}
 		for _, f := range []string{"package.json", "bun.lock", "AGENTS.md", "vite.config.ts", "index.html", "LICENSE"} {
 			if _, err := fs.Stat(p.Files, f); err != nil {
 				t.Errorf("%s: %s missing", p.ID, f)
@@ -45,7 +54,7 @@ func TestTemplatesEmbedded(t *testing.T) {
 			}
 		}
 	}
-	for _, id := range []string{"svelte", "react", "empty"} {
+	for _, id := range []string{"svelte", "react", "templ", "empty"} {
 		if !ids[id] {
 			t.Errorf("template %s missing", id)
 		}
@@ -79,6 +88,12 @@ func TestTemplatesManifest(t *testing.T) {
 	}
 	ok := `{"schemaVersion":1,"templates":[{"id":"a","dir":"templates/a","name":"A","runner":"vite-bun","aliases":["old-a"]},{"id":"b","dir":"templates/b","name":"B","runner":"next-pnpm"},{"id":"empty","dir":"templates/empty","name":"Empty","runner":"none"}]}`
 	files["r/templates/empty/.gitkeep"] = &fstest.MapFile{Data: []byte{}}
+	files["r/templates/h/layer.json"] = &fstest.MapFile{Data: []byte(`{"schemaVersion":1,"base":"svelte"}`)}
+	files["r/templates/g2/layer.json"] = &fstest.MapFile{Data: []byte(`{"schemaVersion":1,"base":"empty","source":{"kind":"github-archive","repo":"o/r","commit":"` + strings.Repeat("a", 40) + `"},"files":{"go.mod":"` + strings.Repeat("b", 64) + `"}}`)}
+	g, err := templatesFrom([]byte(`{"schemaVersion":1,"templates":[{"id":"g2","dir":"templates/g2","runner":"go-templ"}]}`), files, "r")
+	if err != nil || len(g) != 1 || g[0].Layer == nil || !g[0].Enabled || g[0].Tool != "go" || g[0].Dev[0] != "{self}" {
+		t.Fatalf("go-templ layer profile: %+v %v", g, err)
+	}
 	ts, err := templatesFrom([]byte(ok), files, "r")
 	if err != nil {
 		t.Fatal(err)
@@ -91,6 +106,8 @@ func TestTemplatesManifest(t *testing.T) {
 		"duplicate": `{"schemaVersion":1,"templates":[{"id":"a","dir":"templates/a","runner":"vite-bun"},{"id":"b","dir":"templates/b","aliases":["a"]}]}`,
 		"missing":   `{"schemaVersion":1,"templates":[{"id":"c","dir":"templates/c","runner":"vite-bun"}]}`,
 		"json":      `{`,
+		"no layer":  `{"schemaVersion":1,"templates":[{"id":"g","dir":"templates/g","runner":"go-templ"}]}`,
+		"bad layer": `{"schemaVersion":1,"templates":[{"id":"h","dir":"templates/h","runner":"go-templ"}]}`,
 	} {
 		if _, err := templatesFrom([]byte(bad), files, "r"); err == nil || !strings.Contains(err.Error(), "templates.json") {
 			t.Errorf("%s: want a templates.json error, got %v", name, err)

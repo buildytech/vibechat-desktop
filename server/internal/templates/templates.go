@@ -32,7 +32,24 @@ type Profile struct {
 	Dev     []string          `json:"-"`
 	DevEnv  map[string]string `json:"-"`
 	Build   []string          `json:"-"`
+	// Runner is the templates.json runner (vite-bun, go-templ, none); Tool the program it needs on PATH (bun, go).
+	Runner string `json:"-"`
+	Tool   string `json:"-"`
+	// Env and Writable are what every tool run of this runner gets in its jail (the Go caches and settings).
+	Env      []string `json:"-"`
+	Writable []string `json:"-"`
+	// Layer is set for a layer template (layer.json): Files is then its checked tree, fetched on first use.
+	Layer *Layer `json:"-"`
 }
+
+// Self is the server's own executable: "{self}" in a runner argv (the Go dev loop, vibechat-server go-dev).
+var Self = func() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "vibechat-server"
+	}
+	return exe
+}()
 
 // Is reports whether id is this template's id or one of its aliases.
 func (p Profile) Is(id string) bool {
@@ -47,10 +64,10 @@ func (p Profile) Is(id string) bool {
 	return false
 }
 
-// Expand replaces {port} and {hmrPort}.
+// Expand replaces {port}, {hmrPort} and {self}.
 func Expand(xs []string, port, hmrPort int) []string {
 	out := make([]string, len(xs))
-	r := strings.NewReplacer("{port}", strconv.Itoa(port), "{hmrPort}", strconv.Itoa(hmrPort))
+	r := strings.NewReplacer("{port}", strconv.Itoa(port), "{hmrPort}", strconv.Itoa(hmrPort), "{self}", Self)
 	for i, x := range xs {
 		out[i] = r.Replace(x)
 	}
@@ -60,8 +77,11 @@ func Expand(xs []string, port, hmrPort int) []string {
 // skip are template paths never copied into a project.
 var skip = map[string]bool{"node_modules": true, "dist": true, ".git": true, "coverage": true, ".gitkeep": true}
 
-// gitignore lines every project gets.
+// gitignore lines every project gets; a Go project also keeps the host's build folder out (GoIgnore).
 const gitignore = "node_modules/\ndist/\ncoverage/\n.env\n*.log\n.vite/\n"
+
+// GoIgnore is the folder the Go runner builds and keeps its dev data in (the binary, PocketBase's pb_data).
+const GoIgnore = ".vibechat/"
 
 // Scaffold copies p into dst (which must not exist) and commits it as the project's first commit. Starters also get a .gitignore; a blank template (no package.json) stays at zero files, with an empty commit.
 func Scaffold(ctx context.Context, p Profile, dst string) error {
@@ -101,6 +121,12 @@ func Scaffold(ctx context.Context, p Profile, dst string) error {
 	if err != nil {
 		return err
 	}
+	// A Go project: the host's build folder stays out of git.
+	if _, err := os.Stat(filepath.Join(dst, "go.mod")); err == nil {
+		if err := EnsureIgnored(dst, GoIgnore); err != nil {
+			return err
+		}
+	}
 	// A blank workspace (runner none / no project files) stays at zero files: no .gitignore either.
 	if _, err := os.Stat(filepath.Join(dst, "package.json")); err == nil {
 		gi := filepath.Join(dst, ".gitignore")
@@ -112,4 +138,19 @@ func Scaffold(ctx context.Context, p Profile, dst string) error {
 		}
 	}
 	return gitx.InitCommit(ctx, dst, "Project from template "+p.ID)
+}
+
+// EnsureIgnored adds line to dir/.gitignore unless it is there.
+func EnsureIgnored(dir, line string) error {
+	gi := filepath.Join(dir, ".gitignore")
+	existing, _ := os.ReadFile(gi)
+	for _, l := range strings.Split(string(existing), "\n") {
+		if strings.TrimSpace(l) == line {
+			return nil
+		}
+	}
+	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
+		existing = append(existing, '\n')
+	}
+	return os.WriteFile(gi, append(existing, []byte(line+"\n")...), 0o644)
 }

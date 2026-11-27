@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -30,6 +31,7 @@ import (
 	"github.com/buildytech/vibechat-desktop/server/internal/isolate"
 	"github.com/buildytech/vibechat-desktop/server/internal/preview"
 	"github.com/buildytech/vibechat-desktop/server/internal/sandbox"
+	"github.com/buildytech/vibechat-desktop/server/internal/templates"
 )
 
 func envOr(name, def string) string {
@@ -137,6 +139,8 @@ func serve(p paths, args []string, stderr io.Writer) int {
 	logf := func(s string) { log.Print(s) }
 	// Project tools (bun install, the dev server) never see the data folder: secrets, auth, other projects.
 	isolate.Configure(isolate.Config{Hide: []string{p.data}, Require: isolate.RequireFromEnv()})
+	// Layer templates (the Go starter) are downloaded once per pinned commit, checked, and kept here.
+	templates.SetCacheDir(filepath.Join(p.data, "cache", "templates"))
 	switch mode, err := isolate.Mode(); {
 	case mode == "":
 		return fail(err)

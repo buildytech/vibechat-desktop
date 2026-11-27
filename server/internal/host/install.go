@@ -28,16 +28,33 @@ func InstallDeps(ctx context.Context, dir string, tpl templates.Profile, log fun
 			return err
 		}
 	}
-	err := runProjectTool(ctx, dir, tpl.Install, installSpec(), log, nil)
+	if tpl.Tool == "go" {
+		if err := checkGo(ctx, dir, tpl, log); err != nil {
+			return err
+		}
+	}
+	spec := toolSpec(tpl)
+	err := runProjectTool(ctx, dir, tpl.Install, spec, log, nil)
 	if err != nil && strings.Contains(err.Error(), "Fail extracting tarball") && ctx.Err() == nil {
 		// Bun on Windows can fail to extract into its cache while another process (antivirus, indexer) holds a
 		// freshly written file; the cache is consistent again on a second run.
 		if log != nil {
 			log("bun install: tarball extraction failed, retrying once")
 		}
-		err = runProjectTool(ctx, dir, tpl.Install, installSpec(), log, nil)
+		err = runProjectTool(ctx, dir, tpl.Install, spec, log, nil)
 	}
 	return err
+}
+
+// toolSpec is the jail of one of the template's tool runs: the runner's own folders and settings (the Go caches),
+// and for Bun its install cache.
+func toolSpec(tpl templates.Profile) isolate.Spec {
+	s := isolate.Spec{Writable: append([]string{}, tpl.Writable...), Env: append([]string{}, tpl.Env...)}
+	if tpl.Tool == "bun" || (tpl.Tool == "" && len(tpl.Install) > 0 && tpl.Install[0] == "bun") {
+		b := installSpec()
+		s.Writable, s.Env = append(s.Writable, b.Writable...), append(s.Env, b.Env...)
+	}
+	return s
 }
 
 // installSpec: an install writes the project and the Bun cache (BUN_INSTALL_CACHE_DIR points Bun at it, since the
@@ -104,4 +121,35 @@ func versionParts(v string) [3]int {
 		p[i], _ = strconv.Atoi(s)
 	}
 	return p
+}
+
+// checkGo answers a clear error when Go is missing or older than the project's go.mod `go` line (GOTOOLCHAIN=local:
+// the host never downloads another toolchain).
+func checkGo(ctx context.Context, dir string, tpl templates.Profile, log func(string)) error {
+	if _, err := exec.LookPath("go"); err != nil {
+		return fmt.Errorf("Go is not installed on this server: run `sudo vibechat-server ensure-go` (or the setup wizard) and try again")
+	}
+	var out bytes.Buffer
+	if err := runProjectTool(ctx, dir, []string{"go", "env", "GOVERSION"}, isolate.Spec{Env: tpl.Env}, log, &out); err != nil {
+		return err
+	}
+	have := strings.TrimPrefix(strings.TrimSpace(out.String()), "go")
+	if need := goModVersion(dir); need != "" && versionLess(have, need) {
+		return fmt.Errorf("Go %s on this server is older than go %s in go.mod: update the server (`sudo vibechat-server ensure-go`)", have, need)
+	}
+	return nil
+}
+
+// goModVersion reads the `go` line of dir/go.mod ("" when absent).
+func goModVersion(dir string) string {
+	raw, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if f := strings.Fields(line); len(f) == 2 && f[0] == "go" {
+			return f[1]
+		}
+	}
+	return ""
 }

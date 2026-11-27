@@ -26,6 +26,9 @@ func TestTemplatesInstallE2E(t *testing.T) {
 	}
 	for _, tpl := range Templates() {
 		t.Run(tpl.ID, func(t *testing.T) {
+			if tpl.Layer != nil && os.Getenv("VIBECHAT_E2E_GO") != "1" {
+				t.Skip("a Go layer template: set VIBECHAT_E2E_GO=1 (needs the pinned Go and network)")
+			}
 			dir := filepath.Join(base, "e2e "+tpl.ID)
 			_ = os.RemoveAll(dir)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -41,6 +44,12 @@ func TestTemplatesInstallE2E(t *testing.T) {
 			}
 			if err := host.InstallDeps(ctx, dir, tpl, func(l string) { t.Log(l) }); err != nil {
 				t.Fatal(err)
+			}
+			if tpl.Tool == "go" {
+				if _, err := os.Stat(filepath.Join(dir, "cmd/site/main.go")); err != nil {
+					t.Fatal(err)
+				}
+				return
 			}
 			want := []string{"node_modules/vite/package.json"}
 			if pkg, _ := os.ReadFile(filepath.Join(dir, "package.json")); strings.Contains(string(pkg), `"tailwindcss"`) {

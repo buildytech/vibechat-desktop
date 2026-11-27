@@ -216,7 +216,7 @@ func (m *Manager) Ensure(id, dir string, p templates.Profile) (host.PreviewStatu
 	extra = append(extra, "PORT="+strconv.Itoa(devPort))
 	// The dev server runs the project's vite.config (code the agent can write): isolated from the server (package
 	// isolate), like the install.
-	full, env, mode, err := isolate.Command(argv, isolate.Spec{Dir: dir, Env: extra})
+	full, env, mode, err := isolate.Command(argv, isolate.Spec{Dir: dir, Env: append(append([]string{}, p.Env...), extra...), Writable: p.Writable})
 	if err != nil {
 		closeLn()
 		return host.PreviewStatus{}, err

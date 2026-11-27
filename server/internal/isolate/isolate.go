@@ -155,6 +155,37 @@ func BunCache() string {
 	return filepath.Join(home, ".bun", "install", "cache")
 }
 
+// GoCache is the shared Go folder of the server user (VIBECHAT_GO_CACHE, else ~/.cache/vibechat-go): the module cache,
+// the build cache and GOPATH of every Go project's tools, bound read-write into their jail.
+func GoCache() string {
+	if d := os.Getenv("VIBECHAT_GO_CACHE"); d != "" {
+		return d
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".cache", "vibechat-go")
+}
+
+// GoEnv is the environment of a Go tool run: the shared caches, modules read-only to the build (-mod=readonly: a
+// build never rewrites go.mod or go.sum), the installed toolchain only (GOTOOLCHAIN=local: go.mod cannot make the
+// tool download another one), no cgo, modules only through the Go proxy and checked against the checksum database.
+func GoEnv(cache string) []string {
+	return []string{
+		"GOPATH=" + filepath.Join(cache, "path"),
+		"GOMODCACHE=" + filepath.Join(cache, "mod"),
+		"GOCACHE=" + filepath.Join(cache, "build"),
+		"GOFLAGS=-mod=readonly",
+		"GOTOOLCHAIN=local",
+		"GOTELEMETRY=off",
+		"GOENV=off",
+		"CGO_ENABLED=0",
+		"GOPROXY=https://proxy.golang.org",
+		"GOSUMDB=sum.golang.org",
+	}
+}
+
 // Mode answers how tools run on this machine now: ModeJail, or ModeCleanEnv with why the jail is not used
 // (an error when Config.Require makes that fatal).
 func Mode() (string, error) {

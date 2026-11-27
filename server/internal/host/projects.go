@@ -150,6 +150,16 @@ func (h *Host) createProject(w http.ResponseWriter, r *http.Request, _ Params) {
 		WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if tpl.Layer != nil {
+		// A layer template (the Go starter): its pinned tree is downloaded and checked once, then cached.
+		lctx, lcancel := context.WithTimeout(r.Context(), 6*time.Minute)
+		_, err := templates.EnsureLayer(lctx, tpl.Layer)
+		lcancel()
+		if err != nil {
+			WriteError(w, http.StatusBadGateway, "Could not get the template: "+err.Error())
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
 	if err := templates.Scaffold(ctx, tpl, dir); err != nil {
