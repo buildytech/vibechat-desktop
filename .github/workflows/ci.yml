@@ -170,6 +170,14 @@ jobs:
           d="$RUNNER_TEMP/Профиль пользователя/VibeChat 144"
           mkdir -p "$d"
           VIBECHAT_E2E_INSTALL=1 VIBECHAT_E2E_DIR="$d" go test -count=1 -v -run TestTemplatesInstallE2E ./server
+      # Go templ: the pinned Go through the server's own ensure-go (size + SHA-256), then the templ template from its
+      # checked layer (scaffold + go mod download) and a Chat templ ZIP per preset imported, built and previewed.
+      - name: Go templ e2e (pinned Go via ensure-go; template, import, build, preview)
+        run: |
+          go run ./server/cmd/vibechat-server ensure-go --root "$RUNNER_TEMP/go"
+          export PATH="$RUNNER_TEMP/go/bin:$PATH" VIBECHAT_GO_CACHE="$RUNNER_TEMP/vibechat-go"
+          go version
+          VIBECHAT_E2E_INSTALL=1 VIBECHAT_E2E_GO=1 go test -count=1 -v -timeout 40m -run 'TestTemplatesInstallE2E/templ|TestTemplImportPreviewE2E' ./server
       - name: Server build (server/cmd/vibechat-server, net/http)
         run: go build -ldflags "-X github.com/buildytech/vibechat-desktop/internal/appid.Version=$VIBECHAT_VERSION" -o bin/vibechat-server-check ./server/cmd/vibechat-server
       - name: Packaging tools (the wails3 CLI without cgo, no GTK here; its nfpm packs the .deb)

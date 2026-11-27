@@ -28,8 +28,8 @@ Two public git submodules, pinned by commit: `third_party/studio` =
 [buildytech/studio](https://github.com/buildytech/studio) (the Studio, the start screen, Agent Contract v1 and the
 host seam, [ADR 0002](https://github.com/buildytech/studio/blob/main/docs/adr/0002-host-seam-contract.md)) and
 `server/third_party/templates` = [buildytech/templates](https://github.com/buildytech/templates) (`templates.json`:
-`svelte`, `react`, `empty`; the server builds its template list from the manifest, so a template with a known runner
-needs only a pin bump). Nothing in a submodule is edited here; a change reaches this repository by moving the pin.
+`svelte`, `react`, `templ`, `empty`; the server builds its template list from the manifest, so a template with a known runner
+needs only a pin bump; `templ` is a layer over Empty: fastygo/starter at a pinned commit, every file checked by SHA-256). Nothing in a submodule is edited here; a change reaches this repository by moving the pin.
 
 ## Скачать / Download
 
@@ -111,8 +111,9 @@ on Linux. `vibechat --version` prints the version. Releases are built by CI from
 
 ### Live preview
 
-- Play starts the project's dev server (`bun x vite --host 127.0.0.1 --port <port> --strictPort`) in its own process
-  group, after the host-side `bun install`. Stop, deleting the project and stopping the server stop the whole group.
+- Play starts the project's dev server (`bun x vite --host 127.0.0.1 --port <port> --strictPort`; a Go templ project:
+  `vibechat-server go-dev --port <port>`, templ generate + go build, rebuild on change, ready on `/healthz`) in its own process
+  group, after the host-side `bun install` (`go mod download`). Stop, deleting the project and stopping the server stop the whole group.
 - The Studio iframe opens the preview gateway, `http://<projectId>.preview.localhost:18121/` (`server/internal/preview`,
   forwarded by the app through the tunnel; on macOS a local port per project), never the dev server directly. The host mints a one-time grant (`?__buildy_grant=…`, 60 s); the proxy also lets through
   requests with its session cookie or that the browser marks as coming from the preview itself (Sec-Fetch-Site
@@ -162,7 +163,10 @@ in a Debian 13 Incus VM and in an Incus container inside it (`scripts/ci-server-
 - The Cursor key: `/var/lib/vibechat/secrets/cursor-key` (0600; a looser file is refused), set in Settings or with
   `vibechat-server set-key` (stdin).
 - `vibechat-server doctor`: system (Debian 13, else a warning), bridge + `cursorsandbox --preflight-only`, Landlock,
-  user namespaces, token, key, bun, git.
+  user namespaces, token, key, bun, git, go (the pinned toolchain in `/opt/vibechat/go`).
+- Import ZIP (`POST /projects/:id/import.zip`, an empty project): shared checks plus one adapter per framework
+  (svelte, react, templ; `manifest.json` `buildy.pack.v1` names it, else `ui8kit.config.json` / `go.mod`):
+  [ADR 0001](docs/adr/0001-import-adapters-and-go-runner.md).
 - Package: `bash scripts/package-server.sh` → `dist/vibechat-server-linux-amd64.deb` (`/usr/lib/vibechat-server`,
   system user `vibechat`, `vibechat-server.service`, `vibechat-update.timer`). The timer runs
   `vibechat-server update` daily: the newest GitHub release, if newer, checked against its `SHA256SUMS`, then
@@ -248,7 +252,8 @@ check, so a second run skips what is done (`/var/lib/vibechat-provision/state.js
    15GiB on the btrfs pool `vibechat`, `security.nesting=true`, proxy devices `127.0.0.1:18120/18121` on the host → the container),
    unprivileged `images:debian/13` container `vibechat-owner`;
 5. server — the release `.deb` and `SHA256SUMS` downloaded on the host, `sha256sum -c --strict`, pushed and installed in
-   the container; Bun (pinned baseline build, sha256 from `server/bridge.lock.json`) for the user `vibechat`;
+   the container; Bun (pinned baseline build, sha256 from `server/bridge.lock.json`) for the user `vibechat`; Go
+   (`internal/gopin`, sha256-pinned) into `/opt/vibechat/go` before the package (whose postinstall runs `vibechat-server ensure-go`);
 6. egress — the allowlist (below);
 7. token — `vibechat-server token new` in the container; the token goes from stdout straight into the app's keychain
    (`SERVER_HOST_TOKEN`), never printed or logged; a rerun checks the stored token with `Authorization: Bearer` sent on
@@ -273,7 +278,8 @@ the IPv4 addresses (/32) of these names, plus DNS to the bridge's dnsmasq:
 `agentn.api5.cursor.sh`, `agentn.us.api5.cursor.sh`, `agentn.global.api5.cursor.sh`, `authenticate.cursor.sh`,
 `authentication.cursor.sh`, `prod.authentication.cursor.sh` (Cursor's list, cursor.com/docs/enterprise/network-configuration),
 `registry.npmjs.org`, `bun.sh`, and GitHub for Bun / server updates (`github.com`, `api.github.com`,
-`codeload.github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`). The host resolves the
+`codeload.github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`), and Go
+(`proxy.golang.org`, `sum.golang.org`, `dl.google.com`). The host resolves the
 names (`/usr/local/sbin/vibechat-egress`, `vibechat-egress.timer` every 10 min), keeps the union with the previous run
 (CDN rotation; an empty resolution keeps the old ACL) and pins the answers in the container's `/etc/hosts`.
 DNS caveats: the rule is by IP, so another site on the same CDN address is reachable too; a name whose addresses change
@@ -315,7 +321,7 @@ the host seam contract tests (server and desktop sides) against the pinned `host
 desktop build when the GUI libraries are there, and `scripts/check-desktop.sh`. CI (`.github/workflows/ci.yml`): job
 `build` (the desktop app on Linux, macOS and Windows: start screen, tests, build, no-local-agent check on the binary
 and the shipped zip, installers), job `server` (Studio, server tests, templates install e2e with Bun 1.3.3 and the
-current one, the agent runtime on the Bun baseline build and under QEMU without AVX2, the server `.deb`), jobs
+current one, the Go templ e2e with the pinned Go, the agent runtime on the Bun baseline build and under QEMU without AVX2, the server `.deb`), jobs
 `server-debian` and `provision-debian` (Debian 13 Incus VMs: install, connection e2e, the setup wizard) and
 `release` (tags only).
 
