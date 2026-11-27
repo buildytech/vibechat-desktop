@@ -1,12 +1,12 @@
 {
 	"fixed": {
-		"file_version": "0.2.5",
-		"product_version": "0.2.5"
+		"file_version": "0.2.6",
+		"product_version": "0.2.6"
 	},
 	"info": {
 		"0409": {
-			"FileVersion": "0.2.5",
-			"ProductVersion": "0.2.5",
+			"FileVersion": "0.2.6",
+			"ProductVersion": "0.2.6",
 			"CompanyName": "BuildY",
 			"FileDescription": "BuildY VibeChat desktop",
 			"LegalCopyright": "© 2026 BuildY",
