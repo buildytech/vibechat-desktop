@@ -249,7 +249,7 @@ jobs:
       - name: Setup wizard on a Debian 13 VPS (Incus VM)
         run: bash scripts/ci-provision-e2e.sh dist/vibechat-server-linux-amd64.deb
 
-  # Tag v* → GitHub Release with stable asset names, so
+  # Tag v* → GitHub Release with stable asset names and body from docs/releases/<tag>.md, so
   # https://github.com/buildytech/vibechat-desktop/releases/latest/download/<name> always points at the newest build.
   release:
     needs: [build, server, server-debian, provision-debian]
@@ -258,6 +258,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: vibechat-installer-*
@@ -267,142 +268,12 @@ jobs:
         with:
           name: vibechat-server
           path: dist
+      # Body is docs/releases/<tag>.md only; a missing file fails the job before publish.
       - name: Release notes
         run: |
-          cat > notes.md <<'EOF'
-          ## 0.2.4
-
-          **Fixed: starter templates follow the UI8Kit contract / Исправлено: стартовые шаблоны по контракту UI8Kit.**
-          In the Svelte and React starters the dark mode toggle and the mobile menu keep their state in the framework and
-          pass it to the Button primitive (`pressed`, `expanded`); no script writes ARIA attributes on the page any more
-          (ui8kit/contract rule 02). The page looks and behaves the same; the starter's checks now catch such code.
-
-          **Исправлено: стартовые шаблоны по контракту UI8Kit.** В стартерах Svelte и React переключатель тёмной темы и
-          мобильное меню хранят состояние во фреймворке и передают его примитиву Button (`pressed`, `expanded`); ни один
-          скрипт больше не пишет ARIA-атрибуты на страницу (правило 02 ui8kit/contract). Внешний вид и поведение те же;
-          проверки стартера теперь ловят такой код.
-
-          Not verified yet: creating a project from each template in the installed app on Mac, Windows and Linux.
-          Не проверено: создание проекта из каждого шаблона в установленной программе на Mac, Windows и Linux.
-
-          ## 0.2.3
-
-          **New: starter templates / Новое: стартовые шаблоны.** Three templates replace the old two: **Svelte**
-          (default) and **React**, the same mobile-first site (header, mobile Sheet menu, dark mode, hero, features,
-          call to action, footer) from UI8Kit primitives, content in JSON fixtures, no backend, the local Istok Web font,
-          a favicon set and the current ui8kit/contract rules for the agent; and **Empty**, a blank Vite page. Projects
-          made from the former templates (`vite-svelte-bun`, `vite-react-bun`) keep working. The server reads the list
-          from `templates.json`, so new templates need no server code.
-
-          **Новое: стартовые шаблоны.** Вместо двух старых шаблонов три: **Svelte** (по умолчанию) и **React** — один и
-          тот же сайт mobile-first (шапка, мобильное меню Sheet, тёмная тема, hero, преимущества, призыв к действию,
-          подвал) на примитивах UI8Kit, контент в JSON fixtures, без бэкенда, локальный шрифт Istok Web, набор favicon и
-          актуальные правила ui8kit/contract для агента; и **Пустой** — чистая страница на Vite. Проекты из прежних
-          шаблонов (`vite-svelte-bun`, `vite-react-bun`) продолжают работать. Сервер берёт список из `templates.json`,
-          новые шаблоны больше не требуют правок сервера.
-
-          Not verified yet: creating a project from each template in the installed app on Mac, Windows and Linux.
-          Не проверено: создание проекта из каждого шаблона в установленной программе на Mac, Windows и Linux.
-
-          ## 0.2.2
-
-          **Fixed: Studio dictionaries / Исправлено: словари Studio.** English dictionaries no longer contain bilingual
-          "EN — RU" strings (the Editor button was "Download ZIP — Скачать ZIP"). EN files are English only, RU files
-          are Russian only. The UI language follows `navigator.language` (`ru` / `ru-*` → Russian, otherwise English).
-          There is no in-app language switch.
-
-          **Исправлено: словари Studio.** В английских словарях больше нет двуязычных строк «EN — RU» (кнопка в Editor
-          была «Download ZIP — Скачать ZIP»). Английский словарь — только английский, русский — только русский. Язык
-          интерфейса берётся из `navigator.language` (`ru` / `ru-*` — русский, иначе английский). Переключателя языка
-          в интерфейсе нет.
-
-          Not verified yet: the language of the installed app's WebView on a real Mac, Windows and Linux desktop
-          (it follows the WebView's `navigator.language`). Please report problems.
-
-          ## 0.2.1
-
-          **Fixed: the agent could not reach Cursor on a wizard-built server / Исправлено: агент не достучался до Cursor на
-          сервере, настроенном мастером.** The container's egress allowlist lacked `api.cursor.com` (the Cursor SDK's API
-          for the account, the model list and agent create), so every agent call failed with "Network request failed" and
-          the Studio model menu showed only Auto. The allowlist now has it, and CI checks that the agent runtime reaches
-          Cursor from the container.
-
-          **Servers set up with 0.2.0 must run the setup wizard again with the 0.2.1 app** (the allowlist lives on the host,
-          the server's self-update does not change it). The wizard skips the steps that are done and rewrites the egress
-          allowlist. After the lockdown the root password is refused, so first sign in as root with your own SSH key (or the
-          provider's web console), run `rm /etc/ssh/sshd_config.d/00-vibechat.conf && systemctl reload ssh`, then run
-          Settings → Set up a new server; the wizard turns password login off again at the end.
-
-          **Серверы, настроенные в 0.2.0, нужно заново провести через мастер настройки в приложении 0.2.1** (список
-          разрешённых адресов лежит на хосте, самообновление сервера его не меняет). Мастер пропустит готовые шаги и
-          перепишет список. После блокировки пароль root не принимается: сначала войдите как root своим SSH-ключом (или
-          через веб-консоль провайдера), выполните `rm /etc/ssh/sshd_config.d/00-vibechat.conf && systemctl reload ssh`,
-          затем «Настроить новый сервер»; в конце мастер снова отключит вход по паролю.
-
-          **Fixed: `vibechat-server doctor` / Исправлено: doctor.** It finds Bun where the service does
-          (`<data>/.bun/bin`) instead of warning "not on PATH", and the bridge line shows the pinned release
-          (`release 1.2.0 (manifest bridgeVersion 1.0.0, sdk 1.2.0)`) instead of the stale manifest version. Doctor находит
-          Bun там же, где сервис, и показывает настоящую версию bridge.
-
-          **New: Download ZIP in the Editor / Новое: «Скачать ZIP» во вкладке Editor.** The Editor toolbar has a
-          Download ZIP button: the project's files as a ZIP, without `.git`, `node_modules`, build output and caches,
-          `.env` / `.env.*` files (`.env.example` is kept), logs, OS files and the agent's local `.cursor` tool config
-          (rules and skills are kept); symlinks are never followed; up to 512 MiB / 50 000 files. In the app the system's
-          Save dialog opens (Downloads by default). Кнопка «Скачать ZIP» в панели Editor: файлы проекта без git,
-          `node_modules`, сборки и `.env`; в приложении открывается системный диалог «Сохранить как».
-
-          Not verified yet: the Save dialog in the installed app on a real Mac, Windows and Linux desktop; the wizard rerun
-          on a real 0.2.0 VPS (CI runs it on Debian 13 Incus VMs). Please report problems.
-
-          ## 0.2.0: the app is a window to your server / Приложение — окно к вашему серверу
-
-          **Breaking: the desktop app no longer runs anything on this computer.** No local agent, no local projects, no
-          templates: the agent, projects and previews run on your own server, **Debian 13 "trixie" x86_64** (one Incus
-          container per user). On start the app shows two choices: **Connect a server** (one you already have, over SSH) or
-          **Set up a new server** (the wizard: a fresh VPS's address and the root password once; it installs Incus, the
-          container and vibechat-server, then turns off password login). Once a server is saved, the app reconnects at start
-          and opens the server's Studio directly. Projects made by earlier versions on this computer stay in `~/VibeChat`; the
-          app no longer opens them (copy them to the server if you need them).
-
-          **Несовместимое изменение: приложение больше ничего не запускает на компьютере.** Агент, проекты и превью работают на
-          вашем сервере (Debian 13 x86_64). При запуске — выбор: «Подключить сервер» или «Настроить новый сервер» (мастер). Если
-          сервер сохранён, приложение подключается само и сразу открывает Studio сервера. Старые локальные проекты остаются в
-          `~/VibeChat`, приложение их больше не открывает.
-
-          Not verified yet: the start screen and the reconnect on a real Mac, Windows and Linux desktop with a real VPS (CI
-          runs the connection and the wizard against Debian 13 Incus VMs only); the setup wizard on real providers (images,
-          cloud-init, socket-activated ssh, IPv6-only hosts); per-port previews on a real Mac (`VIBECHAT_PREVIEW_PORTS=0`
-          turns them off). Please report problems.
-
-          `SHA256SUMS` lists the SHA-256 of every asset (the server's self-update checks the `.deb` against it).
-
-          Desktop app (unzip and run, or the installers below):
-
-          | System | Download | Requirements |
-          |---|---|---|
-          | Linux x64 | [vibechat-desktop-linux-x64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-linux-x64.zip) | GTK 4 + WebKitGTK 6 (`sudo apt install libgtk-4-1 libwebkitgtk-6.0-4`), Ubuntu 24.04 / Debian 13 or newer |
-          | Windows x64 | [vibechat-desktop-windows-x64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-windows-x64.zip) | Windows 10/11 x64 with Microsoft Edge WebView2 (the installer adds it if missing) |
-          | macOS Apple Silicon | [vibechat-desktop-macos-arm64.zip](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-desktop-macos-arm64.zip) | macOS 12+ on M1 or newer |
-
-          Installers: `.deb` (Linux), `vibechat-amd64-installer.exe` (Windows), `BuildY-VibeChat.dmg` (macOS).
-
-          Server (required; Debian 13 "trixie" x86_64, Ubuntu and other systems are not supported for now):
-          [vibechat-server-linux-amd64.deb](https://github.com/buildytech/vibechat-desktop/releases/latest/download/vibechat-server-linux-amd64.deb)
-          — the agent host on 127.0.0.1 only (reached through SSH), host token, Cursor key in a 0600 file on the server, the
-          agent in the Cursor SDK sandbox (Landlock + bubblewrap), daily self-update from these releases
-          (`vibechat-update.timer`, checked against `SHA256SUMS`). The setup wizard installs it for you. The server's x64
-          agent runtime runs on any x86-64 CPU with SSE4.2 (no AVX/AVX2 needed).
-
-          The Cursor key is an API key of type **Cursor** (`grok_…`) from https://grok.com/dashboard/api-keys ("Grok API"
-          `xai-…` keys do not work); enter it in the server's Studio Settings.
-
-          Builds are **not signed or notarized**.
-          - macOS: after unzipping, run `xattr -dr com.apple.quarantine "BuildY VibeChat.app"` (or right-click → Open).
-          - Windows: SmartScreen may warn — «More info» → «Run anyway».
-
-          Log for bug reports: Windows `%APPDATA%\tw.buildy.vibechat\logs\vibechat.log`, macOS
-          `~/Library/Application Support/tw.buildy.vibechat/logs/vibechat.log`, Linux `~/.config/tw.buildy.vibechat/logs/vibechat.log`.
-          EOF
+          set -euo pipefail
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          [ -f "$notes" ] || { echo "release: missing $notes — add the notes file for this tag before publishing" >&2; exit 1; }
       # SHA256SUMS of every asset: vibechat-server update checks the server .deb against it before dpkg -i.
       # One list (assets.txt) is both what SHA256SUMS covers and what gets uploaded: the names must match exactly.
       - name: SHA256SUMS
@@ -429,7 +300,7 @@ jobs:
           set -euo pipefail
           ls -l dist
           mapfile -t files < <(sed 's|^|dist/|' assets.txt)
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "BuildY VibeChat $GITHUB_REF_NAME" --notes-file notes.md \
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "BuildY VibeChat $GITHUB_REF_NAME" --notes-file "docs/releases/${GITHUB_REF_NAME}.md" \
             "${files[@]}" dist/SHA256SUMS
       # What users download: the release's asset names against SHA256SUMS (both ways), then sha256sum -c on the
       # downloaded files.

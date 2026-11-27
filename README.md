@@ -306,7 +306,7 @@ It also writes the portable zip of that OS: `vibechat-desktop-linux-x64.zip`, `v
 `scripts/build-frontend.sh`) writes `vibechat-server-linux-amd64.deb` with the agent runtime. CI uploads
 `vibechat-installer-<os>`, `vibechat-<os>` (the bare executable) and `vibechat-server`; a pushed `v*` tag also
 publishes a GitHub Release with the zips, the installers, the server `.deb` and `SHA256SUMS` under these stable
-names.
+names. The release body is `docs/releases/<tag>.md`; the release job fails if that file is missing.
 
 ## Tests and the gate
 
