@@ -15,15 +15,16 @@ import (
 	"time"
 
 	"github.com/buildytech/vibechat-desktop/server/internal/gitx"
-	"github.com/buildytech/vibechat-desktop/server/internal/isolate"
 	"github.com/buildytech/vibechat-desktop/server/internal/sandbox"
 	"github.com/buildytech/vibechat-desktop/server/internal/store"
 	"github.com/buildytech/vibechat-desktop/server/internal/templates"
 )
 
-// Import ZIP (POST /projects/:id/import.zip): a BuildY Chat pack or a UI8Kit svelte/react project, only into a
-// workspace with no files except .git. Validation is strict (framework, required files, path safety, allowlisted
-// packages, no lifecycle scripts). Tooling from the official starter is added without overwriting src/**.
+// Import ZIP (POST /projects/:id/import.zip): a BuildY Chat pack, a UI8Kit svelte/react project or a Go templ
+// project (fastygo/starter), only into a workspace with no files except .git. This file is the one place of the
+// checks every framework shares (emptiness, the size limits, path safety, symbolic links, environment files,
+// executables, binaries) and the flow; import_adapter.go is the adapter registry, and each framework adapter adds its
+// own checks, fills its core (tooling) from the template and verifies the result. docs/adr/0001-import-adapters-and-go-runner.md.
 
 const (
 	importMaxBytes        = 32 << 20  // compressed
@@ -43,26 +44,9 @@ func (e *importError) Error() string { return e.msg }
 func importFail(status int, msg string) *importError { return &importError{status: status, msg: msg} }
 
 var (
-	importForbiddenScripts = map[string]bool{
-		"preinstall": true, "install": true, "postinstall": true, "prepare": true,
-		"prepublish": true, "prepublishOnly": true, "prepack": true, "postpack": true,
-	}
-	importCommonPkgs = map[string]bool{
-		"clsx": true, "lucide": true, "tailwind-merge": true, "vite": true,
-		"@tailwindcss/vite": true, "tailwindcss": true, "typescript": true,
-		"@types/bun": true, "ui8kit": true, "ui8px": true,
-	}
-	importSveltePkgs = map[string]bool{
-		"svelte": true, "@sveltejs/vite-plugin-svelte": true, "svelte-check": true, "@tsconfig/svelte": true,
-	}
-	importReactPkgs = map[string]bool{
-		"react": true, "react-dom": true, "@vitejs/plugin-react": true, "@types/react": true, "@types/react-dom": true,
-	}
 	importBannedNames = map[string]bool{
 		"node_modules": true, ".git": true,
 	}
-	importOverlayRoots = []string{".cursor", ".ui8px", "scripts"}
-	importOverlayFiles = []string{"AGENTS.md", "tsconfig.json", "svelte.config.js", ".bun-version"}
 )
 
 func (h *Host) importZip(w http.ResponseWriter, r *http.Request, prm Params) {
@@ -70,60 +54,27 @@ func (h *Host) importZip(w http.ResponseWriter, r *http.Request, prm Params) {
 	if !ok {
 		return
 	}
+	fail := func(err error) {
+		WriteError(w, ImportErrorStatus(err), err.Error())
+	}
 	if err := projectFileCount(p.Path); err != nil {
-		if ie, ok := err.(*importError); ok {
-			WriteError(w, ie.status, ie.msg)
-			return
-		}
-		WriteError(w, http.StatusInternalServerError, err.Error())
+		fail(err)
 		return
 	}
 	raw, err := readImportBody(w, r)
 	if err != nil {
-		if ie, ok := err.(*importError); ok {
-			WriteError(w, ie.status, ie.msg)
-			return
+		if _, ok := err.(*importError); !ok {
+			err = importFail(http.StatusBadRequest, "Could not read the ZIP")
 		}
-		WriteError(w, http.StatusBadRequest, "Could not read the ZIP")
+		fail(err)
 		return
 	}
-	files, err := unzipImport(raw)
+	im, err := ImportInto(r.Context(), p.Path, raw, h.template)
 	if err != nil {
-		if ie, ok := err.(*importError); ok {
-			WriteError(w, ie.status, ie.msg)
-			return
-		}
-		WriteError(w, http.StatusBadRequest, "The file is not a valid ZIP")
+		fail(err)
 		return
 	}
-	framework, err := validateImport(files)
-	if err != nil {
-		if ie, ok := err.(*importError); ok {
-			WriteError(w, ie.status, ie.msg)
-			return
-		}
-		WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	// Recheck emptiness right before the write (another tab may have added a file).
-	if err := projectFileCount(p.Path); err != nil {
-		if ie, ok := err.(*importError); ok {
-			WriteError(w, ie.status, ie.msg)
-			return
-		}
-		WriteError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	tpl, ok := h.template(framework)
-	if !ok || !tpl.Enabled {
-		WriteError(w, http.StatusInternalServerError, "This build has no "+framework+" template to finish the import")
-		return
-	}
-	if err := materializeImport(files, p.Path, framework, tpl); err != nil {
-		_ = wipeImportedFiles(p.Path)
-		WriteError(w, http.StatusInternalServerError, "Could not write the imported files: "+err.Error())
-		return
-	}
+	framework := im.Framework
 	if err := gitx.CommitAll(r.Context(), p.Path, "Import ZIP ("+framework+")"); err != nil {
 		_ = wipeImportedFiles(p.Path)
 		WriteError(w, http.StatusInternalServerError, "Could not commit the import: "+err.Error())
@@ -138,15 +89,16 @@ func (h *Host) importZip(w http.ResponseWriter, r *http.Request, prm Params) {
 	h.resetSetup(p.ID)
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
-	if err := InstallDeps(ctx, p.Path, tpl, h.opts.Log); err != nil {
+	if err := InstallDeps(ctx, p.Path, im.Template, h.opts.Log); err != nil {
 		WriteError(w, http.StatusInternalServerError, "Imported, but installing dependencies failed: "+err.Error())
 		return
 	}
-	verifyLog, verifyErr := verifyImported(ctx, p.Path, h.opts.Log)
+	verifyLog, verifyErr := im.Verify(ctx, p.Path, h.opts.Log)
 	out := map[string]any{
 		"ok":        true,
 		"framework": framework,
-		"files":     len(files),
+		"files":     im.Files,
+		"layers":    im.Layers,
 		"project":   h.projectJSON(p),
 		"verify":    map[string]any{"ok": verifyErr == nil, "log": verifyLog},
 	}
@@ -154,6 +106,74 @@ func (h *Host) importZip(w http.ResponseWriter, r *http.Request, prm Params) {
 		out["verify"].(map[string]any)["error"] = verifyErr.Error()
 	}
 	WriteJSON(w, http.StatusOK, out)
+}
+
+// Imported is a ZIP written into a project folder (not committed, dependencies not installed).
+type Imported struct {
+	Framework string
+	Files     int
+	Layers    map[string]int // core, data, code (importLayers)
+	Template  templates.Profile
+	adapter   importAdapter
+}
+
+// Verify runs the adapter's check of the written project (after InstallDeps).
+func (im *Imported) Verify(ctx context.Context, dir string, log func(string)) (string, error) {
+	return im.adapter.Verify(ctx, dir, im.Template, log)
+}
+
+// ImportErrorStatus is the HTTP status of an ImportInto error (500 for an unexpected one).
+func ImportErrorStatus(err error) int {
+	if ie, ok := err.(*importError); ok {
+		return ie.status
+	}
+	return http.StatusInternalServerError
+}
+
+// ImportInto checks a ZIP (shared checks, the adapter's) and writes it into dir, which must have no file but .git;
+// template answers the template of a framework. On a write error dir is emptied again.
+func ImportInto(ctx context.Context, dir string, raw []byte, template func(id string) (templates.Profile, bool)) (*Imported, error) {
+	if err := projectFileCount(dir); err != nil {
+		return nil, err
+	}
+	files, err := unzipImport(raw)
+	if err != nil {
+		if _, ok := err.(*importError); !ok {
+			err = importFail(http.StatusBadRequest, "The file is not a valid ZIP")
+		}
+		return nil, err
+	}
+	in := newImportInput(files)
+	ad, err := selectImportAdapter(in)
+	if err != nil {
+		return nil, err
+	}
+	framework := ad.ID()
+	tpl, ok := template(framework)
+	if !ok || !tpl.Enabled {
+		return nil, importFail(http.StatusInternalServerError, "This build has no "+framework+" template to finish the import")
+	}
+	if tpl.Runner != "" && tpl.Runner != ad.Runner() {
+		return nil, importFail(http.StatusInternalServerError, "The "+framework+" template runs with "+tpl.Runner+", the import needs "+ad.Runner())
+	}
+	vctx, vcancel := context.WithTimeout(ctx, 6*time.Minute)
+	err = ad.Validate(vctx, in, tpl)
+	vcancel()
+	if err != nil {
+		if _, ok := err.(*importError); !ok {
+			err = importFail(http.StatusBadRequest, err.Error())
+		}
+		return nil, err
+	}
+	// Recheck emptiness right before the write (another tab may have added a file).
+	if err := projectFileCount(dir); err != nil {
+		return nil, err
+	}
+	if err := materializeImport(in, dir, ad, tpl); err != nil {
+		_ = wipeImportedFiles(dir)
+		return nil, importFail(http.StatusInternalServerError, "Could not write the imported files: "+err.Error())
+	}
+	return &Imported{Framework: framework, Files: len(files), Layers: importLayers(in, ad, tpl), Template: tpl, adapter: ad}, nil
 }
 
 func (h *Host) resetSetup(id string) {
@@ -347,77 +367,6 @@ func fileMap(files []importFile) map[string][]byte {
 	return m
 }
 
-func validateImport(files []importFile) (framework string, err error) {
-	by := fileMap(files)
-	// A chat transcript or session file is not a project.
-	if looksLikeChatExport(files) {
-		return "", importFail(http.StatusBadRequest, "This is a chat export (buildy.chat.v1 or buildy:v2), not a project ZIP")
-	}
-	cfgRaw, ok := by["ui8kit.config.json"]
-	if !ok {
-		return "", importFail(http.StatusBadRequest, "ui8kit.config.json is required")
-	}
-	var cfg struct {
-		Framework       string `json:"framework"`
-		Runtime         string `json:"runtime"`
-		ContractVersion string `json:"contractVersion"`
-		Dir             string `json:"dir"`
-	}
-	if err := json.Unmarshal(cfgRaw, &cfg); err != nil {
-		return "", importFail(http.StatusBadRequest, "ui8kit.config.json is not valid JSON")
-	}
-	fw := strings.TrimSpace(cfg.Framework)
-	if fw != "svelte" && fw != "react" {
-		return "", importFail(http.StatusBadRequest, "The import must be a Svelte or React UI8Kit project (ui8kit.config.json framework)")
-	}
-	if rt := strings.TrimSpace(cfg.Runtime); rt != "" && rt != fw {
-		return "", importFail(http.StatusBadRequest, "ui8kit.config.json runtime must match framework")
-	}
-	if cfg.ContractVersion != "" && !strings.HasPrefix(cfg.ContractVersion, "2.") {
-		return "", importFail(http.StatusBadRequest, "ui8kit.config.json contractVersion must be 2.x")
-	}
-	if d := strings.TrimSpace(cfg.Dir); d != "" && d != "src" {
-		return "", importFail(http.StatusBadRequest, "ui8kit.config.json dir must be src")
-	}
-	if _, ok := by["ui8kit.lock.json"]; !ok {
-		return "", importFail(http.StatusBadRequest, "ui8kit.lock.json is required")
-	}
-	if _, ok := by["index.html"]; !ok {
-		return "", importFail(http.StatusBadRequest, "index.html is required")
-	}
-	if _, ok := by["vite.config.ts"]; !ok {
-		if _, ok := by["vite.config.js"]; !ok {
-			return "", importFail(http.StatusBadRequest, "vite.config.ts is required")
-		}
-	}
-	if _, ok := by["src/styles/index.css"]; !ok {
-		return "", importFail(http.StatusBadRequest, "src/styles/index.css is required")
-	}
-	hasSvelte := hasKey(by, "src/App.svelte") && hasKey(by, "src/main.ts")
-	hasReact := hasKey(by, "src/App.tsx") && hasKey(by, "src/main.tsx")
-	if hasSvelte && hasReact {
-		return "", importFail(http.StatusBadRequest, "The ZIP mixes Svelte and React entry files")
-	}
-	if fw == "svelte" && !hasSvelte {
-		return "", importFail(http.StatusBadRequest, "A Svelte import needs src/App.svelte and src/main.ts")
-	}
-	if fw == "react" && !hasReact {
-		return "", importFail(http.StatusBadRequest, "A React import needs src/App.tsx and src/main.tsx")
-	}
-	if err := validatePackageJSON(by["package.json"], fw); err != nil {
-		return "", err
-	}
-	if raw, ok := by["GENERATOR.json"]; ok {
-		var g struct {
-			Name string `json:"name"`
-		}
-		if json.Unmarshal(raw, &g) == nil && g.Name != "" && fw == "svelte" && !strings.Contains(g.Name, "svelte") {
-			return "", importFail(http.StatusBadRequest, "GENERATOR.json does not match a Svelte pack")
-		}
-	}
-	return fw, nil
-}
-
 func hasKey(m map[string][]byte, k string) bool { _, ok := m[k]; return ok }
 
 func looksLikeChatExport(files []importFile) bool {
@@ -443,59 +392,25 @@ func looksLikeChatExport(files []importFile) bool {
 	return false
 }
 
-func validatePackageJSON(raw []byte, framework string) error {
-	if len(raw) == 0 {
-		return importFail(http.StatusBadRequest, "package.json is required")
+func wipeImportedFiles(root string) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return err
 	}
-	var pkg struct {
-		Type            string            `json:"type"`
-		Scripts         map[string]string `json:"scripts"`
-		Dependencies    map[string]string `json:"dependencies"`
-		DevDependencies map[string]string `json:"devDependencies"`
-		BundleDeps      any               `json:"bundleDependencies"`
-		BundledDeps     any               `json:"bundledDependencies"`
-	}
-	if err := json.Unmarshal(raw, &pkg); err != nil {
-		return importFail(http.StatusBadRequest, "package.json is not valid JSON")
-	}
-	if pkg.Type != "" && pkg.Type != "module" {
-		return importFail(http.StatusBadRequest, "package.json type must be module")
-	}
-	if pkg.Scripts["dev"] == "" || pkg.Scripts["build"] == "" {
-		return importFail(http.StatusBadRequest, "package.json needs dev and build scripts")
-	}
-	for name := range pkg.Scripts {
-		if importForbiddenScripts[name] {
-			return importFail(http.StatusBadRequest, "package.json must not include the "+name+" lifecycle script")
+	for _, e := range entries {
+		if e.Name() == ".git" {
+			continue
 		}
-	}
-	if pkg.BundleDeps != nil || pkg.BundledDeps != nil {
-		return importFail(http.StatusBadRequest, "package.json must not include bundledDependencies")
-	}
-	allow := map[string]bool{}
-	for k := range importCommonPkgs {
-		allow[k] = true
-	}
-	if framework == "svelte" {
-		for k := range importSveltePkgs {
-			allow[k] = true
-		}
-	} else {
-		for k := range importReactPkgs {
-			allow[k] = true
-		}
-	}
-	for _, deps := range []map[string]string{pkg.Dependencies, pkg.DevDependencies} {
-		for name := range deps {
-			if !allow[name] {
-				return importFail(http.StatusBadRequest, "package.json has a dependency that is not allowed: "+name)
-			}
+		if err := os.RemoveAll(filepath.Join(root, e.Name())); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func materializeImport(files []importFile, root, framework string, tpl templates.Profile) error {
+// materializeImport writes the ZIP into a staging folder inside the project, lets the adapter fill its core there,
+// and moves the result into the project (executable bits kept: the Go starter's scripts).
+func materializeImport(in *importInput, root string, ad importAdapter, tpl templates.Profile) error {
 	staging, err := os.MkdirTemp(root, ".import-*")
 	if err != nil {
 		return err
@@ -505,18 +420,12 @@ func materializeImport(files []importFile, root, framework string, tpl templates
 	if err != nil {
 		return err
 	}
-	for _, f := range files {
+	for _, f := range in.files {
 		if err := writeInside(staging, f.path, f.data, 0o644); err != nil {
 			return err
 		}
 	}
-	if err := overlayTooling(staging, framework, tpl); err != nil {
-		return err
-	}
-	if err := mergePackageJSON(staging, framework, tpl); err != nil {
-		return err
-	}
-	if err := ensureViteHMR(staging, framework); err != nil {
+	if err := ad.Fill(staging, in, tpl); err != nil {
 		return err
 	}
 	return filepath.WalkDir(staging, func(p string, d fs.DirEntry, err error) error {
@@ -534,6 +443,10 @@ func materializeImport(files []importFile, root, framework string, tpl templates
 		if d.IsDir() {
 			return os.MkdirAll(dest, 0o755)
 		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
 		raw, err := os.ReadFile(p)
 		if err != nil {
 			return err
@@ -541,7 +454,14 @@ func materializeImport(files []importFile, root, framework string, tpl templates
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return err
 		}
-		return os.WriteFile(dest, raw, 0o644)
+		mode := os.FileMode(0o644)
+		if info.Mode()&0o100 != 0 {
+			mode = 0o755
+		}
+		if err := os.WriteFile(dest, raw, mode); err != nil {
+			return err
+		}
+		return os.Chmod(dest, mode)
 	})
 }
 
@@ -560,230 +480,27 @@ func writeInside(root, rel string, data []byte, mode os.FileMode) error {
 	return os.WriteFile(abs, data, mode)
 }
 
-func overlayTooling(dst, framework string, tpl templates.Profile) error {
-	copyIfMissing := func(name string) error {
-		if _, err := os.Stat(filepath.Join(dst, filepath.FromSlash(name))); err == nil {
-			return nil
-		}
-		raw, err := fs.ReadFile(tpl.Files, name)
-		if err != nil {
-			return nil // starter may not have this file
-		}
-		return writeInside(dst, name, raw, 0o644)
-	}
-	for _, name := range importOverlayFiles {
-		if name == "svelte.config.js" && framework != "svelte" {
-			continue
-		}
-		if err := copyIfMissing(name); err != nil {
-			return err
-		}
-	}
-	for _, dir := range importOverlayRoots {
-		_ = fs.WalkDir(tpl.Files, dir, func(name string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
-			}
-			if _, err := os.Stat(filepath.Join(dst, filepath.FromSlash(name))); err == nil {
-				return nil
-			}
-			raw, err := fs.ReadFile(tpl.Files, name)
-			if err != nil {
-				return nil
-			}
-			_ = writeInside(dst, name, raw, 0o644)
-			return nil
-		})
-	}
-	if _, err := os.Stat(filepath.Join(dst, ".gitignore")); err != nil {
-		_ = writeInside(dst, ".gitignore", []byte(templatesGitignore()), 0o644)
-	}
-	return nil
-}
-
-func templatesGitignore() string {
-	return "node_modules/\ndist/\ncoverage/\n.env\n*.log\n.vite/\n"
-}
-
-func mergePackageJSON(dst, framework string, tpl templates.Profile) error {
-	path := filepath.Join(dst, "package.json")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	var pkg map[string]any
-	if err := json.Unmarshal(raw, &pkg); err != nil {
-		return err
-	}
-	if _, ok := pkg["type"]; !ok {
-		pkg["type"] = "module"
-	}
-	if _, ok := pkg["private"]; !ok {
-		pkg["private"] = true
-	}
-	engines, _ := pkg["engines"].(map[string]any)
-	if engines == nil {
-		engines = map[string]any{}
-	}
-	if _, ok := engines["bun"]; !ok {
-		engines["bun"] = ">=1.3.3"
-	}
-	pkg["engines"] = engines
-	scripts, _ := pkg["scripts"].(map[string]any)
-	if scripts == nil {
-		scripts = map[string]any{}
-	}
-	if _, err := os.Stat(filepath.Join(dst, "scripts/rules-check.ts")); err == nil {
-		if _, ok := scripts["rules:check"]; !ok {
-			scripts["rules:check"] = "bun scripts/rules-check.ts"
-		}
-	}
-	if _, err := os.Stat(filepath.Join(dst, "scripts/ui8px-gate.ts")); err == nil {
-		if _, ok := scripts["lint:px"]; !ok {
-			scripts["lint:px"] = "bun scripts/ui8px-gate.ts"
-		}
-	}
-	if _, ok := scripts["check:ui8kit"]; !ok {
-		scripts["check:ui8kit"] = "ui8kit check"
-	}
-	if _, ok := scripts["check"]; !ok {
-		if framework == "svelte" {
-			scripts["check"] = "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings"
-		} else {
-			scripts["check"] = "tsc --noEmit"
-		}
-	}
-	if _, err := os.Stat(filepath.Join(dst, "scripts/ui8px-gate.ts")); err == nil {
-		if _, ok := scripts["verify"]; !ok {
-			scripts["verify"] = "bun run check:ui8kit && bun run rules:check && bun run lint:px && bun run check && bun run build"
-		}
-	}
-	pkg["scripts"] = scripts
-	dev, _ := pkg["devDependencies"].(map[string]any)
-	if dev == nil {
-		dev = map[string]any{}
-	}
-	if tplRaw, err := fs.ReadFile(tpl.Files, "package.json"); err == nil {
-		var tplPkg struct {
-			DevDependencies map[string]string `json:"devDependencies"`
-			UI8Kit          any               `json:"ui8kit"`
-		}
-		if json.Unmarshal(tplRaw, &tplPkg) == nil {
-			for k, v := range tplPkg.DevDependencies {
-				if _, ok := dev[k]; !ok {
-					// Only add packages the allowlist already accepts.
-					if importCommonPkgs[k] || (framework == "svelte" && importSveltePkgs[k]) || (framework == "react" && importReactPkgs[k]) {
-						dev[k] = v
-					}
-				}
-			}
-			if _, ok := pkg["ui8kit"]; !ok && tplPkg.UI8Kit != nil {
-				pkg["ui8kit"] = tplPkg.UI8Kit
-			}
-			// A BuildY Chat pack composes registry blocks in src/App.svelte and src/sections (not Block-rooted
-			// organisms). Point the contract checks at the registry files so verify/lint:px can run.
-			if _, err := os.Stat(filepath.Join(dst, "GENERATOR.json")); err == nil {
-				pkg["ui8kit"] = map[string]any{
-					"runtime":     framework,
-					"kit":         []any{"src/kit", "src/compose", "src/icons", "src/utils", "src/presets", "src/components"},
-					"composition": []any{"src/blocks"},
-					"blockRoot":   []any{"src/blocks"},
-				}
-				// Chat-generated sections spread JSON props as string; svelte-check then fails, and
-				// excluding those files is ineffective because src/main.ts imports them. Keep lint:px and build.
-				if s, ok := pkg["scripts"].(map[string]any); ok {
-					s["verify"] = "bun run check:ui8kit && bun run rules:check && bun run lint:px && bun run build"
-				}
-			}
-		}
-	}
-	pkg["devDependencies"] = dev
-	out, err := json.MarshalIndent(pkg, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(out, '\n'), 0o644)
-}
-
-func ensureViteHMR(dst, framework string) error {
-	candidates := []string{"vite.config.ts", "vite.config.js"}
-	var path string
-	var raw []byte
-	for _, c := range candidates {
-		b, err := os.ReadFile(filepath.Join(dst, c))
-		if err == nil {
-			path, raw = filepath.Join(dst, c), b
-			break
-		}
-	}
-	if path == "" {
-		return nil
-	}
-	if bytes.Contains(raw, []byte("HMR_CLIENT_PORT")) {
-		return nil
-	}
-	plugin := `import { svelte } from "@sveltejs/vite-plugin-svelte";
-import tailwindcss from "@tailwindcss/vite";
-`
-	plugins := "tailwindcss(), svelte()"
-	if framework == "react" {
-		plugin = `import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
-`
-		plugins = "react(), tailwindcss()"
-	}
-	content := `import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
-` + plugin + `
-const hmrPort = process.env.HMR_CLIENT_PORT ? Number(process.env.HMR_CLIENT_PORT) : undefined;
-const hmrProtocol = process.env.HMR_PROTOCOL;
-
-export default defineConfig({
-  plugins: [` + plugins + `],
-  resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
-  server: {
-    host: "127.0.0.1",
-    port: 5173,
-    allowedHosts: true,
-    hmr: {
-      ...(hmrPort ? { clientPort: hmrPort } : {}),
-      ...(hmrProtocol === "ws" || hmrProtocol === "wss" ? { protocol: hmrProtocol } : {}),
-    },
-  },
-  preview: { host: "127.0.0.1", port: 4173 },
-});
-`
-	return os.WriteFile(path, []byte(content), 0o644)
-}
-
-func wipeImportedFiles(root string) error {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if e.Name() == ".git" {
-			continue
-		}
-		if err := os.RemoveAll(filepath.Join(root, e.Name())); err != nil {
-			return err
+// sharedImportChecks are the content checks of every framework (the path checks run while unzipping): no
+// executable binaries (ELF, Mach-O, PE) anywhere in a site project.
+func sharedImportChecks(in *importInput) error {
+	for _, f := range in.files {
+		if isExecutableBinary(f.data) {
+			return importFail(http.StatusBadRequest, "The ZIP must not include executable binaries: "+f.path)
 		}
 	}
 	return nil
 }
 
-func verifyImported(ctx context.Context, dir string, log func(string)) (string, error) {
-	var pkg struct {
-		Scripts map[string]string `json:"scripts"`
+func isExecutableBinary(b []byte) bool {
+	switch {
+	case bytes.HasPrefix(b, []byte("\x7fELF")):
+		return true
+	case bytes.HasPrefix(b, []byte{0xcf, 0xfa, 0xed, 0xfe}), bytes.HasPrefix(b, []byte{0xce, 0xfa, 0xed, 0xfe}),
+		bytes.HasPrefix(b, []byte{0xfe, 0xed, 0xfa, 0xcf}), bytes.HasPrefix(b, []byte{0xca, 0xfe, 0xba, 0xbe}):
+		return true
+	case len(b) > 0x40 && b[0] == 'M' && b[1] == 'Z':
+		off := int(b[0x3c]) | int(b[0x3d])<<8 | int(b[0x3e])<<16 | int(b[0x3f])<<24
+		return off > 0 && off+4 <= len(b) && bytes.Equal(b[off:off+4], []byte("PE\x00\x00"))
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "package.json"))
-	if err != nil {
-		return "", err
-	}
-	if json.Unmarshal(raw, &pkg) != nil || pkg.Scripts["verify"] == "" {
-		return "", nil
-	}
-	var out bytes.Buffer
-	err = runProjectTool(ctx, dir, []string{"bun", "run", "verify"}, isolate.Spec{}, log, &out)
-	return strings.TrimSpace(out.String()), err
+	return false
 }
