@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/buildytech/vibechat-desktop/internal/appid"
+	"github.com/buildytech/vibechat-desktop/internal/gopin"
 	"github.com/buildytech/vibechat-desktop/protocol/auth"
 	"github.com/buildytech/vibechat-desktop/server/internal/agent"
 	"github.com/buildytech/vibechat-desktop/server/internal/bridge"
@@ -80,6 +81,7 @@ func doctor(p paths, listen string, out io.Writer) int {
 			cs = append(cs, ok(tool, path+" "+strings.TrimSpace(string(v))))
 		}
 	}
+	cs = append(cs, goCheck(p))
 	code := 0
 	for _, c := range cs {
 		fmt.Fprintf(out, "%-4s %-11s %s\n", c.level, c.name, c.detail)
@@ -90,11 +92,30 @@ func doctor(p paths, listen string, out io.Writer) int {
 	return code
 }
 
+// goCheck: the pinned Go of Go templ projects (/opt/vibechat/go, on the service's PATH).
+func goCheck(p paths) check {
+	path, err := lookTool(p, "go")
+	if err != nil {
+		return warn("go", "not installed: Go templ projects need Go "+gopin.Version+" (`sudo vibechat-server ensure-go`)")
+	}
+	cmd := procgroup.Command(path, "env", "GOVERSION")
+	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOENV=off")
+	v, _ := cmd.Output()
+	have := strings.TrimSpace(string(v))
+	if have != "go"+gopin.Version {
+		return warn("go", path+" is "+have+", this release pins go"+gopin.Version+" (`sudo vibechat-server ensure-go`)")
+	}
+	return ok("go", path+" "+have)
+}
+
 // lookTool finds a project tool the way the service does: its PATH starts with <data>/.bun/bin (where the setup
 // wizard puts Bun, HOME of the vibechat user), which a doctor run from a shell usually does not have.
 func lookTool(p paths, tool string) (string, error) {
 	if path, err := exec.LookPath(tool); err == nil {
 		return path, nil
+	}
+	if tool == "go" {
+		return exec.LookPath(filepath.Join(gopin.Bin, "go"))
 	}
 	return exec.LookPath(filepath.Join(p.data, ".bun", "bin", tool))
 }

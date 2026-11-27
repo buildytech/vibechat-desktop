@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/buildytech/vibechat-desktop/internal/gopin"
 )
 
 var (
@@ -73,7 +75,7 @@ const (
 // DefaultDomains is the egress allowlist: Cursor (api.cursor.com, the SDK's public API the bridge calls for Me,
 // ListModels and agent create, which is not on Cursor's network page; then the agent's API hosts from
 // cursor.com/docs/enterprise/network-configuration; no wildcards), npm (registry), Bun and GitHub (Bun releases, git over https, vibechat-server
-// updates from GitHub releases) and Debian (the container's security updates over HTTPS). TCP 443 only.
+// updates from GitHub releases), Go (internal/gopin.Domains: modules, checksums, the toolchain) and Debian (the container's security updates over HTTPS). TCP 443 only.
 var DefaultDomains = []string{
 	// Cursor
 	"api.cursor.com",
@@ -87,8 +89,10 @@ var DefaultDomains = []string{
 	"deb.debian.org",
 	// Bun
 	"bun.sh",
-	// GitHub (Bun releases, git, vibechat-server updates)
+	// GitHub (Bun releases, git, vibechat-server updates, the Go templ template at its pinned commit)
 	"github.com", "api.github.com", "codeload.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com",
+	// Go (Go templ projects: the module proxy, the checksum database, the toolchain for ensure-go)
+	"proxy.golang.org", "sum.golang.org", "dl.google.com",
 }
 
 // quote is a shell single-quoted word.
@@ -289,7 +293,8 @@ func containerVars() map[string]string {
 // ---- server
 
 func (w *wizard) serverVars() map[string]string {
-	return map[string]string{"DEB_URL": w.cfg.DebURL, "SUMS_URL": w.cfg.SumsURL, "BUN_URL": BunURL, "BUN_SHA": BunSHA256, "BUN_VERSION": BunVersion}
+	return map[string]string{"DEB_URL": w.cfg.DebURL, "SUMS_URL": w.cfg.SumsURL, "BUN_URL": BunURL, "BUN_SHA": BunSHA256, "BUN_VERSION": BunVersion,
+		"GO_URL": gopin.URL, "GO_SHA": gopin.SHA256, "GO_VERSION": gopin.Version, "GO_DIR": gopin.Dir}
 }
 
 const sumsLine = `awk '$2 ~ /^\*?vibechat-server-linux-amd64\.deb$/' "$work/SHA256SUMS"`
@@ -305,6 +310,7 @@ incus exec "$C" -- dpkg-query -W -f '${Status}' vibechat-server 2>/dev/null </de
 for c in curl bwrap; do incus exec "$C" -- sh -c "command -v $c" >/dev/null 2>&1 </dev/null || exit 3; done
 [ "$(incus exec "$C" -- /var/lib/vibechat/.bun/bin/bun --version 2>/dev/null </dev/null)" = "$BUN_VERSION" ] || exit 3
 [ "$(incus exec "$C" -- readlink /var/lib/vibechat/.bun/bin/node 2>/dev/null </dev/null)" = bun ] || exit 3
+[ "$(incus exec "$C" -- env GOTOOLCHAIN=local "$GO_DIR/go/bin/go" env GOVERSION 2>/dev/null </dev/null)" = "go$GO_VERSION" ] || exit 3
 incus exec "$C" -- dpkg-query -W -f '${Status}' unattended-upgrades 2>/dev/null </dev/null | grep -q 'install ok installed' || exit 3
 incus exec "$C" -- grep -q 'Unattended-Upgrade "1"' /etc/apt/apt.conf.d/20auto-upgrades </dev/null || exit 3
 if incus exec "$C" -- grep -rqs 'http://deb.debian.org' /etc/apt/sources.list /etc/apt/sources.list.d </dev/null; then exit 3; fi
@@ -321,6 +327,9 @@ curl -fsSL --retry 3 -o "$work/vibechat-server-linux-amd64.deb" "$DEB_URL"
 curl -fsSL --retry 3 -o "$work/bun.zip" "$BUN_URL"
 echo "$BUN_SHA  $work/bun.zip" | sha256sum -c --strict --quiet - || { echo "Bun does not match its pinned SHA-256" >&2; exit 1; }
 unzip -q -o "$work/bun.zip" -d "$work/bun"
+# Go for templ projects (pinned like Bun; downloaded here, so the container needs no dl.google.com for it).
+curl -fsSL --retry 3 -o "$work/go.tgz" "$GO_URL"
+echo "$GO_SHA  $work/go.tgz" | sha256sum -c --strict --quiet - || { echo "Go does not match its pinned SHA-256" >&2; exit 1; }
 ct() { incus exec "$C" -- "$@" </dev/null; }
 ct apt-get update -qq
 ct env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates unzip bubblewrap >/dev/null
@@ -328,6 +337,9 @@ ct env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificate
 ct sh -c 'for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do [ -f "$f" ] && sed -i "s#http://deb.debian.org#https://deb.debian.org#g" "$f"; done; true'
 ct env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unattended-upgrades >/dev/null
 ct sh -c "printf '%s\n' 'APT::Periodic::Update-Package-Lists \"1\";' 'APT::Periodic::Unattended-Upgrade \"1\";' > /etc/apt/apt.conf.d/20auto-upgrades"
+# Go before the package: its postinstall (ensure-go) then finds the pinned toolchain in place.
+incus file push "$work/go.tgz" "$C/root/go.tgz"
+ct sh -c 'set -e; install -d -m 755 "$1"; rm -rf "$1/go.new"; install -d -m 755 "$1/go.new"; tar -xzf /root/go.tgz -C "$1/go.new" --no-same-owner; rm -rf "$1/go"; mv "$1/go.new/go" "$1/go"; rm -rf "$1/go.new" /root/go.tgz' sh "$GO_DIR"
 incus file push "$work/vibechat-server-linux-amd64.deb" "$C/root/vibechat-server.deb"
 ct env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --reinstall /root/vibechat-server.deb >/dev/null
 ct rm -f /root/vibechat-server.deb
@@ -439,7 +451,7 @@ egress:
   protocol: tcp
   destination: $all
   destination_port: "443"
-  description: Cursor, npm, Bun and GitHub
+  description: Cursor, npm, Bun, GitHub and Go
   state: enabled
 - action: allow
   protocol: udp

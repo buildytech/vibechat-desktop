@@ -8,6 +8,11 @@ fi
 mkdir -p /var/lib/vibechat
 chown vibechat:vibechat /var/lib/vibechat
 chmod 0700 /var/lib/vibechat
+# The pinned Go toolchain for Go templ projects (/opt/vibechat/go; a no-op when it is current). It needs
+# dl.google.com in the egress allowlist; without it the server runs and `vibechat-server doctor` says what is missing.
+if [ -x /usr/bin/vibechat-server ]; then
+	timeout 900 /usr/bin/vibechat-server ensure-go || echo "vibechat-server: Go for templ projects is not installed (run: vibechat-server ensure-go)" >&2
+fi
 if [ -d /run/systemd/system ]; then
 	systemctl daemon-reload || true
 	systemctl enable vibechat-server.service vibechat-update.timer >/dev/null 2>&1 || true
