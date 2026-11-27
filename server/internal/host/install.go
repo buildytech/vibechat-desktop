@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/buildytech/vibechat-desktop/server/internal/isolate"
 	"github.com/buildytech/vibechat-desktop/server/internal/templates"
 )
 
@@ -27,16 +28,26 @@ func InstallDeps(ctx context.Context, dir string, tpl templates.Profile, log fun
 			return err
 		}
 	}
-	err := runTool(ctx, dir, tpl.Install, nil, log)
+	err := runProjectTool(ctx, dir, tpl.Install, installSpec(), log, nil)
 	if err != nil && strings.Contains(err.Error(), "Fail extracting tarball") && ctx.Err() == nil {
 		// Bun on Windows can fail to extract into its cache while another process (antivirus, indexer) holds a
 		// freshly written file; the cache is consistent again on a second run.
 		if log != nil {
 			log("bun install: tarball extraction failed, retrying once")
 		}
-		err = runTool(ctx, dir, tpl.Install, nil, log)
+		err = runProjectTool(ctx, dir, tpl.Install, installSpec(), log, nil)
 	}
 	return err
+}
+
+// installSpec: an install writes the project and the Bun cache (BUN_INSTALL_CACHE_DIR points Bun at it, since the
+// jail's HOME is a private /tmp).
+func installSpec() isolate.Spec {
+	cache := isolate.BunCache()
+	if cache == "" {
+		return isolate.Spec{}
+	}
+	return isolate.Spec{Writable: []string{cache}, Env: []string{"BUN_INSTALL_CACHE_DIR=" + cache}}
 }
 
 // minBun reads `"engines": {"bun": ">=X.Y.Z"}` from dir/package.json ("" when not set).
@@ -55,8 +66,11 @@ func minBun(dir string) string {
 }
 
 func checkBun(ctx context.Context, dir string, log func(string)) error {
+	if _, err := exec.LookPath("bun"); err != nil {
+		return fmt.Errorf("Bun is not installed or not on PATH: install it from https://bun.sh and restart the app")
+	}
 	var out bytes.Buffer
-	if err := runToolOutput(ctx, dir, []string{"bun", "--version"}, nil, log, &out); err != nil {
+	if err := runProjectTool(ctx, dir, []string{"bun", "--version"}, isolate.Spec{}, log, &out); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return fmt.Errorf("Bun is not installed or not on PATH: install it from https://bun.sh and restart the app")
 		}

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/buildytech/vibechat-desktop/internal/appid"
@@ -15,6 +16,7 @@ import (
 	"github.com/buildytech/vibechat-desktop/server/internal/agent"
 	"github.com/buildytech/vibechat-desktop/server/internal/bridge"
 	"github.com/buildytech/vibechat-desktop/server/internal/hostwire"
+	"github.com/buildytech/vibechat-desktop/server/internal/isolate"
 	"github.com/buildytech/vibechat-desktop/server/internal/procgroup"
 )
 
@@ -69,6 +71,7 @@ func doctor(p paths, listen string, out io.Writer) int {
 	}
 	cs = append(cs, kernelChecks()...)
 	cs = append(cs, sandboxCheck(p))
+	cs = append(cs, isolationCheck(p))
 	for _, tool := range []string{"bun", "git"} {
 		if path, err := lookTool(p, tool); err != nil {
 			cs = append(cs, warn(tool, "not on PATH: projects need it"))
@@ -114,6 +117,35 @@ func sandboxCheck(p paths) check {
 		return bad("sandbox", "the agent would run without the SDK sandbox")
 	}
 	return ok("sandbox", "cursorsandbox --preflight-only passed (bridge "+install.Manifest.Describe()+")")
+}
+
+// isolationCheck runs a probe the way the server runs bun install and the dev server (package isolate): it must
+// not see the secrets folder, the server's /proc entry or a key in its environment.
+func isolationCheck(p paths) check {
+	if runtime.GOOS != "linux" {
+		return warn("tools", "project tools run with a clean environment only (no bubblewrap on "+runtime.GOOS+")")
+	}
+	isolate.Configure(isolate.Config{Hide: []string{p.data}, Require: true})
+	dir, err := os.MkdirTemp("", "vibechat-doctor-tools-")
+	if err != nil {
+		return bad("tools", err.Error())
+	}
+	defer os.RemoveAll(dir)
+	probe := `[ -e "$1" ] && echo "secrets visible"; [ -r "/proc/$2/environ" ] && echo "server /proc visible"; env | grep -q '^CURSOR_API_KEY=' && echo "key in env"; true`
+	argv, env, mode, err := isolate.Command([]string{"/bin/sh", "-c", probe, "sh", filepath.Join(p.data, "secrets"), strconv.Itoa(os.Getpid())}, isolate.Spec{Dir: dir})
+	if err != nil {
+		return bad("tools", err.Error())
+	}
+	cmd := procgroup.Command(argv[0], argv[1:]...)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return bad("tools", fmt.Sprintf("%s probe: %v %s", mode, err, strings.TrimSpace(string(out))))
+	}
+	if leak := strings.TrimSpace(string(out)); leak != "" {
+		return bad("tools", mode+": "+strings.ReplaceAll(leak, "\n", ", "))
+	}
+	return ok("tools", "bun install and the dev server run in "+mode+" without "+p.data)
 }
 
 // supportedOS is the only server system for now (the owner's decision; Ubuntu is not planned).

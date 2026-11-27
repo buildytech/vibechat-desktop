@@ -26,6 +26,7 @@ import (
 	assets "github.com/buildytech/vibechat-desktop/server"
 	"github.com/buildytech/vibechat-desktop/server/internal/host"
 	"github.com/buildytech/vibechat-desktop/server/internal/hostwire"
+	"github.com/buildytech/vibechat-desktop/server/internal/isolate"
 	"github.com/buildytech/vibechat-desktop/server/internal/preview"
 )
 
@@ -132,6 +133,16 @@ func serve(p paths, args []string, stderr io.Writer) int {
 		log.Printf("cursor key not used: %v", err)
 	}
 	logf := func(s string) { log.Print(s) }
+	// Project tools (bun install, the dev server) never see the data folder: secrets, auth, other projects.
+	isolate.Configure(isolate.Config{Hide: []string{p.data}, Require: isolate.RequireFromEnv()})
+	switch mode, err := isolate.Mode(); {
+	case mode == "":
+		return fail(err)
+	case err != nil:
+		log.Printf("WARNING: project tools run with a clean environment only, not isolated from the data folder: %v", err)
+	default:
+		log.Printf("project tools: %s", mode)
+	}
 	gw := preview.NewGateway(logf, previewPort)
 	h, closeHost, err := hostwire.New(seam, hostwire.Config{
 		DataDir: p.data, ProjectsDir: p.projects, Keys: keys, Preview: gw,

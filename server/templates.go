@@ -32,13 +32,14 @@ type manifest struct {
 	} `json:"templates"`
 }
 
-// runners are the run profiles this build knows. Dependencies are installed by the host (outside the agent sandbox),
-// the dev server binds 127.0.0.1 on a host-chosen port and its HMR client talks to the preview proxy port.
+// runners are the run profiles this build knows. Dependencies are installed by the host, isolated from the server
+// (package isolate) and without lifecycle scripts (--ignore-scripts: package.json is code the agent can write); the
+// dev server, isolated the same way, binds 127.0.0.1 on a host-chosen port and its HMR client talks to the preview proxy port.
 func runners() map[string]templates.Profile {
 	viteDev := []string{"bun", "x", "vite", "--host", "127.0.0.1", "--port", "{port}", "--strictPort"}
 	viteEnv := map[string]string{"HMR_CLIENT_PORT": "{hmrPort}", "HMR_PROTOCOL": "ws", "BROWSER": "none"}
 	return map[string]templates.Profile{
-		"vite-bun": {Install: []string{"bun", "install"}, Dev: viteDev, DevEnv: viteEnv, Build: []string{"bun", "run", "build"}},
+		"vite-bun": {Install: []string{"bun", "install", "--ignore-scripts"}, Dev: viteDev, DevEnv: viteEnv, Build: []string{"bun", "run", "build"}},
 	}
 }
 

@@ -31,7 +31,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -39,6 +38,7 @@ import (
 	"time"
 
 	"github.com/buildytech/vibechat-desktop/server/internal/host"
+	"github.com/buildytech/vibechat-desktop/server/internal/isolate"
 	"github.com/buildytech/vibechat-desktop/server/internal/procgroup"
 	"github.com/buildytech/vibechat-desktop/server/internal/templates"
 )
@@ -54,8 +54,6 @@ const (
 // Manager owns the dev servers. Zero value is not usable; call New.
 type Manager struct {
 	log func(string)
-	// environ is the base environment of dev servers (os.Environ without CURSOR_API_KEY).
-	environ []string
 
 	// gatewayPort > 0: gateway mode (one Host-routed listener, see Gateway).
 	gatewayPort int
@@ -118,15 +116,7 @@ func New(log func(string)) *Manager {
 	if log == nil {
 		log = func(string) {}
 	}
-	var env []string
-	for _, kv := range os.Environ() {
-		name, _, _ := strings.Cut(kv, "=")
-		if strings.EqualFold(name, "CURSOR_API_KEY") {
-			continue
-		}
-		env = append(env, kv)
-	}
-	return &Manager{log: log, environ: env, projects: map[string]*server{}}
+	return &Manager{log: log, projects: map[string]*server{}}
 }
 
 type server struct {
@@ -219,13 +209,21 @@ func (m *Manager) Ensure(id, dir string, p templates.Profile) (host.PreviewStatu
 		}
 	}
 	argv := templates.Expand(p.Dev, devPort, proxyPort)
-	cmd := procgroup.Command(argv[0], argv[1:]...)
-	cmd.Dir = dir
-	cmd.Env = append([]string{}, m.environ...)
+	var extra []string
 	for k, v := range p.DevEnv {
-		cmd.Env = append(cmd.Env, k+"="+templates.Expand([]string{v}, devPort, proxyPort)[0])
+		extra = append(extra, k+"="+templates.Expand([]string{v}, devPort, proxyPort)[0])
 	}
-	cmd.Env = append(cmd.Env, "PORT="+strconv.Itoa(devPort))
+	extra = append(extra, "PORT="+strconv.Itoa(devPort))
+	// The dev server runs the project's vite.config (code the agent can write): isolated from the server (package
+	// isolate), like the install.
+	full, env, mode, err := isolate.Command(argv, isolate.Spec{Dir: dir, Env: extra})
+	if err != nil {
+		closeLn()
+		return host.PreviewStatus{}, err
+	}
+	cmd := procgroup.Command(full[0], full[1:]...)
+	cmd.Dir = dir
+	cmd.Env = env
 	out := &tailBuffer{max: 16 << 10}
 	cmd.Stdout, cmd.Stderr = out, out
 	procgroup.Prepare(cmd)
@@ -256,7 +254,7 @@ func (m *Manager) Ensure(id, dir string, p templates.Profile) (host.PreviewStatu
 	}()
 	go s.waitReady()
 	m.projects[id] = s
-	m.log(fmt.Sprintf("preview %s: %s (dev 127.0.0.1:%d, proxy %s)", id, strings.Join(argv, " "), devPort, s.origin))
+	m.log(fmt.Sprintf("preview %s: %s (%s, dev 127.0.0.1:%d, proxy %s)", id, strings.Join(argv, " "), mode, devPort, s.origin))
 	return s.snapshot(), nil
 }
 

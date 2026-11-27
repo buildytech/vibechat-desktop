@@ -13,6 +13,8 @@ Group=vibechat
 Environment=VIBECHAT_DATA_DIR=/var/lib/vibechat
 Environment=PATH=/var/lib/vibechat/.bun/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HOME=/var/lib/vibechat
+# bun install and the dev server run in a bubblewrap jail without the data folder; never without it.
+Environment=VIBECHAT_TOOLS_ISOLATION=require
 ExecStart=/usr/bin/vibechat-server serve
 StateDirectory=vibechat
 StateDirectoryMode=0700
