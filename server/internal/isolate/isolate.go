@@ -173,6 +173,7 @@ func GoCache() string {
 // tool download another one), no cgo, modules only through the Go proxy and checked against the checksum database.
 func GoEnv(cache string) []string {
 	return []string{
+		"VIBECHAT_GO_CACHE=" + cache, // go-dev in the jail (HOME=/tmp there) finds the shared cache and its build lock
 		"GOPATH=" + filepath.Join(cache, "path"),
 		"GOMODCACHE=" + filepath.Join(cache, "mod"),
 		"GOCACHE=" + filepath.Join(cache, "build"),

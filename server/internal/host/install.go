@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/buildytech/vibechat-desktop/server/internal/golock"
 	"github.com/buildytech/vibechat-desktop/server/internal/isolate"
 	"github.com/buildytech/vibechat-desktop/server/internal/templates"
 )
@@ -32,6 +33,12 @@ func InstallDeps(ctx context.Context, dir string, tpl templates.Profile, log fun
 		if err := checkGo(ctx, dir, tpl, log); err != nil {
 			return err
 		}
+		// One Go command at a time on the server (go-dev builds take the same lock).
+		release, err := golock.Lock(ctx, isolate.GoCache())
+		if err != nil {
+			return err
+		}
+		defer release()
 	}
 	spec := toolSpec(tpl)
 	err := runProjectTool(ctx, dir, tpl.Install, spec, log, nil)

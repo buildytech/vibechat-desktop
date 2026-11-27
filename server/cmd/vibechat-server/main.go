@@ -10,6 +10,8 @@
 //	vibechat-server forget-key   remove it
 //	vibechat-server doctor       check this machine: bridge + SDK sandbox preflight, Landlock, user namespaces, tools
 //	vibechat-server update       install the newest official release if it is newer (vibechat-update.timer, root)
+//	vibechat-server ensure-go    install the pinned Go toolchain for Go templ projects (root; the wizard, update)
+//	vibechat-server go-dev --port N  the live preview loop of a Go templ project (the go-templ runner, in the jail)
 //	vibechat-server --check-key  ask Cursor whether the stored key works (no key printed)
 //	vibechat-server --version
 //	vibechat-server --hook <ev>  the agent's permission hook (stdin JSON → stdout JSON)
@@ -95,12 +97,16 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return doctor(p, defaultListen, stdout)
 	case "update":
 		return update(args, stdout, stderr)
+	case "ensure-go":
+		return ensureGo(args, stdout, stderr)
+	case "go-dev":
+		return goDev(args, stdout, stderr)
 	case "--check-key", "check-key":
 		return hostwire.CheckKey(p.data, "journalctl -u vibechat-server", p.keys(), "Settings in the app or `vibechat-server set-key`")
 	case "--bridge-smoke":
 		return hostwire.BridgeSmoke(p.data, "stderr")
 	case "-h", "--help", "help":
-		fmt.Fprintln(stdout, "vibechat-server [serve | token new | set-key | forget-key | doctor | update | --check-key | --version]")
+		fmt.Fprintln(stdout, "vibechat-server [serve | token new | set-key | forget-key | doctor | update | ensure-go | go-dev | --check-key | --version]")
 		return 0
 	}
 	fmt.Fprintf(stderr, "vibechat-server: unknown command %q (try --help)\n", cmd)
