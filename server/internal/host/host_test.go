@@ -272,7 +272,7 @@ func TestCredentialSaveChecksTheKey(t *testing.T) {
 		t.Fatalf("inner space: %d %s", code, out)
 	}
 	if code, out := put("grok_bad_supersecret_2a61"); code != 200 || !strings.Contains(out, "Invalid Service Token") ||
-		!strings.Contains(out, "grok.com/dashboard/api-keys") || !strings.Contains(out, `starts with \"grok\"`) || strings.Contains(out, "supersecret") {
+		!strings.Contains(out, "grok.com/dashboard/api-keys") || !strings.Contains(out, `prefix \"grok_\"`) || strings.Contains(out, "supersecret") {
 		t.Fatalf("rejected key: %d %s", code, out)
 	} else if k, _ := e.host.opts.Keys.Key(); k != "grok_bad_supersecret_2a61" {
 		t.Fatal("a rejected key must still be kept")
@@ -292,12 +292,12 @@ func TestAgentErrorExplainsARejectedKey(t *testing.T) {
 	e := newEnv(t, pinnedSeam(t), false)
 	_ = e.host.opts.Keys.Store("grok_supersecret_middle_2a61")
 	msg := e.host.agentError("Could not start the agent: ", &bridge.Error{Code: "unauthenticated", Message: "Invalid Service Token"})
-	for _, want := range []string{"Invalid Service Token", "28 chars", `"grok"`, `"2a61"`, "from keychain", "grok.com/dashboard/api-keys"} {
+	for _, want := range []string{"Invalid Service Token", "28 chars", `prefix "grok_"`, "fingerprint sha256:", "from keychain", "grok.com/dashboard/api-keys"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("%q lacks %q", msg, want)
 		}
 	}
-	if strings.Contains(msg, "supersecret") {
+	if strings.Contains(msg, "supersecret") || strings.Contains(msg, "2a61") {
 		t.Fatal("key leaked")
 	}
 	if got := e.host.agentError("x: ", errors.New("boom")); got != "x: boom" {

@@ -345,7 +345,11 @@ func (h *Host) runPrompt(ctx context.Context, p store.Project, s *store.Session,
 		out["usage"] = map[string]int64{"tokensIn": u.InputTokens, "tokensOut": u.OutputTokens, "cacheReadTokens": u.CacheReadTokens,
 			"cacheWriteTokens": u.CacheWriteTokens, "reasoningTokens": u.ReasoningTokens, "totalTokens": u.TotalTokens}
 	}
-	h.opts.Log(fmt.Sprintf("run %s session %s model %s: status %v tools %d files %d usage %+v", tr.RunID, s.ID, body.ModelID, out["status"], tr.ToolCalls, len(changed), tr.Usage))
+	line := fmt.Sprintf("run %s session %s model %s: status %v tools %d files %d usage %+v", tr.RunID, s.ID, body.ModelID, out["status"], tr.ToolCalls, len(changed), tr.Usage)
+	if errMsg != "" {
+		line += " error: " + oneLine(errMsg, 400)
+	}
+	h.opts.Log(line)
 	return out
 }
 
@@ -488,4 +492,13 @@ func (h *Host) modelDropped(modelID string, err error) string {
 		return "\n\nThis model is not available for your Cursor key and was removed from the model list; pick another one."
 	}
 	return ""
+}
+
+// oneLine is s on one line, cut to max runes (for the log).
+func oneLine(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > max {
+		s = string(r[:max]) + "…"
+	}
+	return s
 }

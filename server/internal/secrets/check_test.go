@@ -25,14 +25,17 @@ func TestForeign(t *testing.T) {
 	}
 }
 
-// The diagnostic never carries more than the first and last 4 characters.
+// The diagnostic names a known public prefix and a fingerprint, never a character of the secret part.
 func TestDescribeIsNotSecret(t *testing.T) {
-	key := "grok" + "SECRETMIDDLEPART" + strings.Repeat("x", 78) + "2a61"
+	key := "grok_" + "SECRETMIDDLEPART" + strings.Repeat("x", 77) + "2a61"
 	d := Describe(" "+key+"\n", "keychain")
-	for _, want := range []string{"102 chars", `"grok"`, `"2a61"`, "whitespace around", "keychain"} {
+	for _, want := range []string{"102 chars", `prefix "grok_"`, "fingerprint sha256:", "whitespace around", "keychain"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("%q lacks %q", d, want)
 		}
+	}
+	if strings.Contains(d, "2a61") || strings.Contains(Describe("abcdSECRET", ""), "abcd") {
+		t.Fatalf("a key fragment leaked: %q", d)
 	}
 	if strings.Contains(d, "SECRET") || strings.Contains(AuthHint(key, "env"), "SECRET") {
 		t.Fatal("key leaked into the diagnostic")

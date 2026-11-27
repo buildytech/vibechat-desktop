@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"strings"
@@ -37,15 +38,23 @@ func CheckFormat(key string) error {
 	return nil
 }
 
-// Describe is the non-secret diagnostic of a key for logs and errors: length, the first 4 characters, whitespace,
-// non-ASCII and where it came from. Never more of the key.
+// knownPrefixes are the public key prefixes Describe may name (the type of a key, not a part of its secret).
+var knownPrefixes = []string{"grok_", "key_", "crsr_", "xai-", "sk-"}
+
+// Describe is the non-secret diagnostic of a key for logs and errors: length, its known public prefix (grok_, xai-…;
+// nothing of an unknown one), a short SHA-256 fingerprint to tell two keys apart, whitespace, non-ASCII and where
+// it came from. No character of the secret part.
 func Describe(key, source string) string {
 	raw := key
 	key = strings.TrimSpace(key)
-	prefix := key
-	if len(prefix) > 4 {
-		prefix = prefix[:4]
+	prefix := "unknown prefix"
+	for _, p := range knownPrefixes {
+		if len(key) > len(p) && strings.EqualFold(key[:len(p)], p) {
+			prefix = fmt.Sprintf("prefix %q", strings.ToLower(p))
+			break
+		}
 	}
+	sum := sha256.Sum256([]byte(key))
 	ws := "no whitespace"
 	if raw != key {
 		ws = "whitespace around (trimmed)"
@@ -60,7 +69,7 @@ func Describe(key, source string) string {
 	if source == "" {
 		source = "unknown"
 	}
-	return fmt.Sprintf("key: %d chars, starts with %q, ends with %q, %s%s, from %s", len(key), prefix, strings.TrimPrefix(Mask(key), "••••"), ws, ascii, source)
+	return fmt.Sprintf("key: %d chars, %s, fingerprint sha256:%x, %s%s, from %s", len(key), prefix, sum[:4], ws, ascii, source)
 }
 
 // AuthHint explains a key Cursor rejected (unauthenticated / permission denied).
