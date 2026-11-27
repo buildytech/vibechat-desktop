@@ -19,7 +19,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       # The app version: scripts/package.sh and the desktop build stamp it (internal/appid.Version); a v* tag wins.
-      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.3' }}
+      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.4' }}
     defaults:
       run:
         shell: bash
@@ -130,7 +130,7 @@ jobs:
   server:
     runs-on: ubuntu-24.04
     env:
-      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.3' }}
+      VIBECHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.2.4' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -270,6 +270,21 @@ jobs:
       - name: Release notes
         run: |
           cat > notes.md <<'EOF'
+          ## 0.2.4
+
+          **Fixed: starter templates follow the UI8Kit contract / Исправлено: стартовые шаблоны по контракту UI8Kit.**
+          In the Svelte and React starters the dark mode toggle and the mobile menu keep their state in the framework and
+          pass it to the Button primitive (`pressed`, `expanded`); no script writes ARIA attributes on the page any more
+          (ui8kit/contract rule 02). The page looks and behaves the same; the starter's checks now catch such code.
+
+          **Исправлено: стартовые шаблоны по контракту UI8Kit.** В стартерах Svelte и React переключатель тёмной темы и
+          мобильное меню хранят состояние во фреймворке и передают его примитиву Button (`pressed`, `expanded`); ни один
+          скрипт больше не пишет ARIA-атрибуты на страницу (правило 02 ui8kit/contract). Внешний вид и поведение те же;
+          проверки стартера теперь ловят такой код.
+
+          Not verified yet: creating a project from each template in the installed app on Mac, Windows and Linux.
+          Не проверено: создание проекта из каждого шаблона в установленной программе на Mac, Windows и Linux.
+
           ## 0.2.3
 
           **New: starter templates / Новое: стартовые шаблоны.** Three templates replace the old two: **Svelte**
