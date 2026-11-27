@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -399,6 +400,9 @@ func TestDefaults(t *testing.T) {
 
 // limitsSh: at most 2 CPUs and 4 GiB, 75% of the memory on a smaller host.
 func TestLimitsFollowTheHost(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the script runs on the Debian host (nproc, /proc/meminfo)")
+	}
 	out, err := exec.Command("bash", "-c", "set -eu\n"+limitsSh+`echo "$cpu $mem"`).Output()
 	if err != nil {
 		t.Fatal(err)
@@ -411,6 +415,9 @@ func TestLimitsFollowTheHost(t *testing.T) {
 
 // The inbound filter allows sshd's ports on the default-route interfaces and drops the rest there.
 func TestFirewallRules(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the script runs on the Debian host (GNU tools)")
+	}
 	dir := t.TempDir()
 	stub := func(name, body string) {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body), 0o755); err != nil {

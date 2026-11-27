@@ -102,8 +102,10 @@ ct dpkg-query -W -f '${Status}' unattended-upgrades | grep -q 'install ok instal
 [ "$(in_vm incus config get "$c" snapshots.schedule)" = @daily ] && [ "$(in_vm incus config get "$c" snapshots.expiry)" = 7d ] || fail "snapshot schedule"
 [ -n "$(in_vm swapon --noheadings --show=NAME)" ] || fail "no swap on the host"
 in_vm systemctl is-active -q vibechat-host-firewall.service || fail "the host firewall is not active"
-in_vm nft list table inet vibechat_host | grep -q 'jump wan' || fail "the host firewall table"
-if in_vm ss -Hlnu 'sport = :5355' | grep -q .; then fail "LLMNR still listens"; fi
+fw="$(in_vm nft list table inet vibechat_host)" || fail "no host firewall table"
+grep -q 'jump wan' <<<"$fw" || fail "the host firewall table: $fw"
+llmnr="$(in_vm ss -Hlnu 'sport = :5355')"
+[ -z "$llmnr" ] || fail "LLMNR still listens: $llmnr"
 echo "host: firewall, no LLMNR, swap, daily snapshots; container: node, unattended-upgrades, isolated project tools: ok"
 in_vm systemctl is-enabled -q vibechat-egress.timer || fail "vibechat-egress.timer"
 in_vm systemctl start vibechat-egress.service || fail "the egress refresh fails"
