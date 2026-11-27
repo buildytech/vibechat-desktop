@@ -56,6 +56,9 @@ func TestDesktopRoutesMatchTheContract(t *testing.T) {
 	if !reflect.DeepEqual(provision.Steps, s.ProvisionSteps) {
 		t.Errorf("provision.Steps %v, contract %v", provision.Steps, s.ProvisionSteps)
 	}
+	if !reflect.DeepEqual(provision.Substeps, s.ProvisionSubsteps) {
+		t.Errorf("provision.Substeps %v, contract %v", provision.Substeps, s.ProvisionSubsteps)
+	}
 	if !reflect.DeepEqual(jsonFields(remote.Archive{}), s.DesktopArchive) || !reflect.DeepEqual(jsonFields(remote.ArchiveInput{}), s.DesktopArchiveInput) {
 		t.Errorf("remote.Archive %v / ArchiveInput %v, contract %v / %v", jsonFields(remote.Archive{}), jsonFields(remote.ArchiveInput{}), s.DesktopArchive, s.DesktopArchiveInput)
 	}

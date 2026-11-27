@@ -105,8 +105,8 @@ func (w *wizard) vars(extra map[string]string) map[string]string {
 func (w *wizard) steps() []step {
 	return []step{
 		{id: StepPreflight, check: w.preflight},
-		{id: StepIncus, check: w.checkOf(StepIncus, incusCheck, nil), apply: w.applyOf(StepIncus, incusApply, nil)},
-		{id: StepContainer, check: w.checkOf(StepContainer, containerCheck, nil), apply: w.applyOf(StepContainer, containerApply, nil)},
+		{id: StepIncus, check: w.checkOf(StepIncus, incusCheck, nil), apply: w.applySubsOf(StepIncus, incusApply, nil)},
+		{id: StepContainer, check: w.checkOf(StepContainer, containerCheck, nil), apply: w.applySubsOf(StepContainer, containerApply, nil)},
 		{id: StepServer, check: w.checkOf(StepServer, serverCheck, w.serverVars()), apply: w.applyOf(StepServer, serverApply, w.serverVars())},
 		{id: StepEgress, check: w.checkOf(StepEgress, egressCheck, w.egressVars()), apply: w.applyOf(StepEgress, egressApply(w.egressFiles()), w.egressVars())},
 		{id: StepToken, check: w.tokenCheck, apply: w.tokenApply},
@@ -176,9 +176,12 @@ incus profile device get default root pool >/dev/null 2>&1 || exit 3
 `
 
 const incusApply = `
+sub apt-update
 apt-get update -qq
+sub install-packages
 apt-get install -y -qq incus curl ca-certificates unzip btrfs-progs >/dev/null
 systemctl start incus.socket >/dev/null 2>&1 || true
+sub admin-init
 # --minimal: a local dir pool and incusbr0, no network listener (the app never gets the Incus API).
 incus storage list -f csv | grep -q . || incus admin init --minimal
 `
@@ -202,10 +205,13 @@ incus config show "$C" | grep -qx -- "- $PROFILE" || exit 3
 `
 
 const containerApply = `
+sub storage-pool
 # A dir pool (incus admin init --minimal) cannot enforce size=15GiB; a loop-file btrfs pool can (qgroups).
 incus storage show "$POOL" >/dev/null 2>&1 || incus storage create "$POOL" btrfs size=18GiB
+sub bridge
 incus network show "$NET" >/dev/null 2>&1 || incus network create "$NET" ipv4.address=auto ipv4.nat=true ipv6.address=none
 incus network set "$NET" ipv4.nat=true ipv6.address=none
+sub profile
 incus profile show "$PROFILE" >/dev/null 2>&1 || incus profile create "$PROFILE"
 incus profile set "$PROFILE" limits.cpu=2 limits.memory=4GiB security.nesting=true
 incus profile unset "$PROFILE" security.privileged >/dev/null 2>&1 || true
@@ -223,8 +229,10 @@ dev eth0 nic network="$NET" name=eth0
 # The host's loopback ports into the container's loopback (sshd's permitopen for the tunnel user).
 dev api proxy listen=tcp:127.0.0.1:18120 connect=tcp:127.0.0.1:18120 bind=host
 dev preview proxy listen=tcp:127.0.0.1:18121 connect=tcp:127.0.0.1:18121 bind=host
+sub launch-image
 incus info "$C" >/dev/null 2>&1 || incus launch images:debian/13 "$C" -p "$PROFILE"
 [ "$(incus info "$C" | awk '/^Status:/ {print $2}')" = RUNNING ] || incus start "$C"
+sub wait-dns
 for _ in $(seq 1 90); do incus exec "$C" -- getent hosts deb.debian.org >/dev/null 2>&1 </dev/null && break; sleep 2; done
 `
 

@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -20,6 +22,8 @@ type ProvisionOptions struct {
 	DebURL, SumsURL string
 	RollbackAfter   time.Duration
 	Container       string
+	// ReadyPause: how long the wizard shows "the server is ready" before the app connects (default 2 s).
+	ReadyPause time.Duration
 }
 
 // ProvisionInput is DesktopProvisionInputSchema.
@@ -29,12 +33,32 @@ type ProvisionInput struct {
 	RootPublicKey string `json:"rootPublicKey,omitempty"`
 }
 
-// ProvisionStep is one entry of DesktopProvision.steps.
+// ProvisionStep is one entry of DesktopProvision.steps; times are Unix milliseconds of the app's clock.
 type ProvisionStep struct {
-	ID     string `json:"id"`
-	State  string `json:"state"`
-	Detail string `json:"detail,omitempty"`
+	ID        string         `json:"id"`
+	State     string         `json:"state"`
+	Detail    string         `json:"detail,omitempty"`
+	StartedAt int64          `json:"startedAt,omitempty"`
+	EndedAt   int64          `json:"endedAt,omitempty"`
+	Subs      []ProvisionSub `json:"subs,omitempty"`
 }
+
+// ProvisionSub is one substep of a long step (provision.Substeps).
+type ProvisionSub struct {
+	ID        string `json:"id"`
+	State     string `json:"state"`
+	StartedAt int64  `json:"startedAt,omitempty"`
+	EndedAt   int64  `json:"endedAt,omitempty"`
+}
+
+// ProvisionLogLine is one line of the run's log (secrets scrubbed).
+type ProvisionLogLine struct {
+	At   int64  `json:"at"`
+	Text string `json:"text"`
+}
+
+// provisionLogMax is how many of the last log lines the progress carries.
+const provisionLogMax = 200
 
 // Provision is DesktopProvisionSchema.
 type Provision struct {
@@ -44,6 +68,10 @@ type Provision struct {
 	HostKeyFingerprint string          `json:"hostKeyFingerprint,omitempty"`
 	RollbackSeconds    int             `json:"rollbackSeconds"`
 	Problem            *Problem        `json:"problem,omitempty"`
+	// StartedAt of the current or last run; Now is the app's clock when it answered (for the elapsed timers).
+	StartedAt int64              `json:"startedAt,omitempty"`
+	Now       int64              `json:"now"`
+	Log       []ProvisionLogLine `json:"log"`
 }
 
 // ProvisionPath is the seam path of the wizard's routes.
@@ -57,26 +85,47 @@ func (m *Manager) provisionOptions() ProvisionOptions {
 	if p.RollbackAfter <= 0 {
 		p.RollbackAfter = 5 * time.Minute
 	}
+	if p.ReadyPause == 0 {
+		p.ReadyPause = 2 * time.Second
+	}
 	return p
 }
 
 func idleProvision(rollback time.Duration) Provision {
-	p := Provision{State: "idle", RollbackSeconds: int(rollback / time.Second)}
+	p := Provision{State: "idle", RollbackSeconds: int(rollback / time.Second), Log: []ProvisionLogLine{}}
 	for _, id := range provision.Steps {
-		p.Steps = append(p.Steps, ProvisionStep{ID: id, State: provision.Pending})
+		st := ProvisionStep{ID: id, State: provision.Pending}
+		for _, sub := range provision.Substeps[id] {
+			st.Subs = append(st.Subs, ProvisionSub{ID: sub, State: provision.Pending})
+		}
+		p.Steps = append(p.Steps, st)
 	}
 	return p
+}
+
+// copyProvision is a deep copy of p (the answer never shares slices with the running wizard).
+func copyProvision(p Provision) Provision {
+	out := p
+	out.Steps = make([]ProvisionStep, len(p.Steps))
+	for i, s := range p.Steps {
+		s.Subs = append([]ProvisionSub(nil), s.Subs...)
+		out.Steps[i] = s
+	}
+	out.Log = append([]ProvisionLogLine{}, p.Log...)
+	return out
 }
 
 // Provision answers the wizard's progress.
 func (m *Manager) Provision() Provision {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var p Provision
 	if m.prov == nil {
-		return idleProvision(m.provisionOptions().RollbackAfter)
+		p = idleProvision(m.provisionOptions().RollbackAfter)
+	} else {
+		p = copyProvision(*m.prov)
 	}
-	p := *m.prov
-	p.Steps = append([]ProvisionStep(nil), m.prov.Steps...)
+	p.Now = time.Now().UnixMilli()
 	return p
 }
 
@@ -100,12 +149,13 @@ func (m *Manager) StartProvision(in ProvisionInput) (Provision, bool) {
 	rootKey := strings.TrimSpace(in.RootPublicKey)
 	m.mu.Lock()
 	if m.provRunning {
-		p := *m.prov
+		p := copyProvision(*m.prov)
 		m.mu.Unlock()
+		p.Now = time.Now().UnixMilli()
 		return p, false
 	}
 	p := idleProvision(o.RollbackAfter)
-	p.State, p.Address = "running", addr
+	p.State, p.Address, p.StartedAt = "running", addr, time.Now().UnixMilli()
 	m.prov, m.provRunning = &p, true
 	m.mu.Unlock()
 	pw := []byte(in.Password)
@@ -113,17 +163,77 @@ func (m *Manager) StartProvision(in ProvisionInput) (Provision, bool) {
 	return m.Provision(), true
 }
 
+// stamp sets the times of a step or substep for a new state: running starts the clock, any end state stops it.
+func stamp(state string, started, ended *int64) {
+	now := time.Now().UnixMilli()
+	switch state {
+	case provision.Running:
+		*started, *ended = now, 0
+	case provision.Pending:
+		*started, *ended = 0, 0
+	default:
+		if *started == 0 {
+			*started = now
+		}
+		*ended = now
+	}
+}
+
 func (m *Manager) setStep(id, state, detail string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i := range m.prov.Steps {
-		if m.prov.Steps[i].ID == id {
-			m.prov.Steps[i].State, m.prov.Steps[i].Detail = state, detail
+		if s := &m.prov.Steps[i]; s.ID == id {
+			s.State, s.Detail = state, detail
+			stamp(state, &s.StartedAt, &s.EndedAt)
 		}
 	}
 }
 
+func (m *Manager) setSub(step, sub, state string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.prov.Steps {
+		if m.prov.Steps[i].ID != step {
+			continue
+		}
+		for j := range m.prov.Steps[i].Subs {
+			if s := &m.prov.Steps[i].Subs[j]; s.ID == sub {
+				s.State = state
+				stamp(state, &s.StartedAt, &s.EndedAt)
+			}
+		}
+	}
+}
+
+// provLog appends a line to the run's log (the last provisionLogMax) and the app's log.
+func (m *Manager) provLog(line string) {
+	m.mu.Lock()
+	if m.prov != nil {
+		m.prov.Log = append(m.prov.Log, ProvisionLogLine{At: time.Now().UnixMilli(), Text: line})
+		if n := len(m.prov.Log); n > provisionLogMax {
+			m.prov.Log = append([]ProvisionLogLine(nil), m.prov.Log[n-provisionLogMax:]...)
+		}
+	}
+	m.mu.Unlock()
+	m.o.Log(line)
+}
+
+// scrubber replaces every secret (the root password, the host token) in a text by "[redacted]". A secret is read
+// when the text is scrubbed: the password is zeroed after the run, the token appears in the middle of it.
+func scrubber(secrets ...func() []byte) func(string) string {
+	return func(s string) string {
+		for _, get := range secrets {
+			if b := get(); len(bytes.Trim(b, "\x00")) > 0 && strings.Contains(s, string(b)) {
+				s = strings.ReplaceAll(s, string(b), "[redacted]")
+			}
+		}
+		return s
+	}
+}
+
 func (m *Manager) endProvision(problem *Problem) {
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.provRunning = false
@@ -140,12 +250,23 @@ func (m *Manager) runProvision(addr, hostport string, pw []byte, rootKey string,
 			pw[i] = 0
 		}
 	}()
+	var tok atomic.Value // the host token, once read or made (for the scrubber)
+	tok.Store([]byte(nil))
+	scrub := scrubber(func() []byte { return pw }, func() []byte { b, _ := tok.Load().([]byte); return b })
+	logf := func(s string) { m.provLog(scrub(s)) }
+	end := func(p *Problem) {
+		if p != nil {
+			p.Message = scrub(p.Message)
+		}
+		m.endProvision(p)
+	}
+	logf("remote: setup of " + addr + " started")
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	defer cancel()
 	signer, err := ensureSigner(m.o.Creds)
 	if err != nil {
 		m.setStep(provision.StepConnect, provision.Failed, err.Error())
-		m.endProvision(&Problem{Code: provision.ProblemStepFailed, Message: err.Error()})
+		end(&Problem{Code: provision.ProblemStepFailed, Message: err.Error()})
 		return
 	}
 	password := func() (string, error) { return string(pw), nil }
@@ -230,7 +351,7 @@ func (m *Manager) runProvision(addr, hostport string, pw []byte, rootKey string,
 			root = c
 			if pin == nil {
 				pin = seen
-				m.o.Log("remote: setup: pinned the host key of " + addr + ": " + ssh.FingerprintSHA256(seen))
+				logf("remote: setup: pinned the host key of " + addr + ": " + ssh.FingerprintSHA256(seen))
 			}
 			t := &Target{Address: addr, User: provision.TunnelUser, HostKey: marshalPin(pin)}
 			if old != nil && old.Address == addr {
@@ -243,17 +364,19 @@ func (m *Manager) runProvision(addr, hostport string, pw []byte, rootKey string,
 			return provision.SSHRunner{Client: c}, nil
 		},
 		TokenGet: func() string {
-			tok, err := m.o.Creds.Get(CredHostToken)
+			t, err := m.o.Creds.Get(CredHostToken)
 			if err != nil {
 				return ""
 			}
-			return tok
+			tok.Store([]byte(strings.TrimSpace(t)))
+			return t
 		},
-		TokenSet: func(tok string) error { return m.o.Creds.Set(CredHostToken, tok) },
+		TokenSet: func(t string) error { tok.Store([]byte(strings.TrimSpace(t))); return m.o.Creds.Set(CredHostToken, t) },
 		Verify:   tunnel,
 		Confirm:  confirm,
-		Progress: m.setStep,
-		Log:      m.o.Log,
+		Progress: func(step, state, detail string) { m.setStep(step, state, scrub(detail)) },
+		Substep:  m.setSub,
+		Log:      logf,
 	}
 	cfg := provision.Config{
 		Container: o.Container, AppKey: authorizedLine(signer.PublicKey()), RootKey: rootKey,
@@ -264,20 +387,26 @@ func (m *Manager) runProvision(addr, hostport string, pw []byte, rootKey string,
 		if !errors.As(err, &pe) {
 			pe = &provision.Error{Code: provision.ProblemStepFailed, Message: err.Error()}
 		}
-		m.endProvision(&Problem{Code: pe.Code, Message: pe.Message})
+		end(&Problem{Code: pe.Code, Message: pe.Message})
 		return
 	}
 	if root != nil {
 		_ = root.Close()
 		root = nil
 	}
-	m.o.Log("remote: setup of " + addr + " done; connecting")
+	logf("remote: setup of " + addr + " done; the server is ready, connecting")
+	if o.ReadyPause > 0 {
+		select {
+		case <-time.After(o.ReadyPause):
+		case <-ctx.Done():
+		}
+	}
 	c := m.Connect(ctx, ConnectInput{Address: addr, User: provision.TunnelUser})
 	if c.Problem != nil {
-		m.endProvision(&Problem{Code: provision.ProblemUnreachable, Message: "the server is set up, connecting failed: " + c.Problem.Message})
+		end(&Problem{Code: provision.ProblemUnreachable, Message: "the server is set up, connecting failed: " + c.Problem.Message})
 		return
 	}
-	m.endProvision(nil)
+	end(nil)
 }
 
 func (m *Manager) serveProvision(w http.ResponseWriter, r *http.Request) {

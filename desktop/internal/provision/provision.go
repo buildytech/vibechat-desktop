@@ -98,7 +98,9 @@ type Hooks struct {
 	Confirm func(ctx context.Context) error
 	// Progress reports every state change of a step (detail never carries a secret).
 	Progress func(step, state, detail string)
-	Log      func(string)
+	// Substep reports the state changes of the substeps of a step (Substeps), optional.
+	Substep func(step, sub, state string)
+	Log     func(string)
 }
 
 // Config of one run.
@@ -223,6 +225,7 @@ func (w *wizard) run(ctx context.Context, s step) error {
 		return fail(err)
 	}
 	if ok && s.apply != nil {
+		w.skipSubs(s.id)
 		w.h.Progress(s.id, Skipped, "")
 		w.h.Log("provision: " + s.id + ": already done")
 		w.finished(ctx, s.id)
@@ -284,12 +287,16 @@ func (w *wizard) checkScript(ctx context.Context, script string, stdin []byte) (
 
 // tail is the last lines of a command's stderr for a message (at most 600 bytes).
 func tail(b []byte) string {
-	s := strings.TrimSpace(string(b))
-	lines := strings.Split(s, "\n")
+	var lines []string
+	for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		if !strings.HasPrefix(l, SubMarker) {
+			lines = append(lines, l)
+		}
+	}
 	if len(lines) > 6 {
 		lines = lines[len(lines)-6:]
 	}
-	s = strings.Join(lines, "\n")
+	s := strings.TrimSpace(strings.Join(lines, "\n"))
 	if len(s) > 600 {
 		s = s[len(s)-600:]
 	}

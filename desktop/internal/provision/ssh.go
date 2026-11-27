@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -28,6 +29,47 @@ func (c *capped) Write(p []byte) (int, error) {
 }
 
 func (r SSHRunner) Run(ctx context.Context, script string, stdin []byte) (Result, error) {
+	return r.run(ctx, script, stdin, nil)
+}
+
+// RunStream is Run that also hands every stderr line to line as it arrives.
+func (r SSHRunner) RunStream(ctx context.Context, script string, stdin []byte, line func(string)) (Result, error) {
+	lw := &lineWriter{fn: line}
+	res, err := r.run(ctx, script, stdin, lw)
+	lw.flush()
+	return res, err
+}
+
+// lineWriter calls fn for each complete line written to it (a partial last line on flush).
+type lineWriter struct {
+	fn  func(string)
+	buf []byte
+}
+
+func (l *lineWriter) Write(p []byte) (int, error) {
+	l.buf = append(l.buf, p...)
+	for {
+		i := bytes.IndexByte(l.buf, '\n')
+		if i < 0 {
+			break
+		}
+		l.fn(string(l.buf[:i]))
+		l.buf = l.buf[i+1:]
+	}
+	if len(l.buf) > 64<<10 {
+		l.buf = l.buf[:0]
+	}
+	return len(p), nil
+}
+
+func (l *lineWriter) flush() {
+	if len(l.buf) > 0 {
+		l.fn(string(l.buf))
+		l.buf = nil
+	}
+}
+
+func (r SSHRunner) run(ctx context.Context, script string, stdin []byte, errTee io.Writer) (Result, error) {
 	s, err := r.Client.NewSession()
 	if err != nil {
 		return Result{}, err
@@ -36,6 +78,9 @@ func (r SSHRunner) Run(ctx context.Context, script string, stdin []byte) (Result
 	s.Stdin = bytes.NewReader(stdin)
 	var out, errb capped
 	s.Stdout, s.Stderr = &out, &errb
+	if errTee != nil {
+		s.Stderr = io.MultiWriter(&errb, errTee)
+	}
 	done := make(chan error, 1)
 	go func() { done <- s.Run("/bin/bash -c " + quote(script)) }()
 	select {

@@ -33,10 +33,12 @@ type Seam struct {
 	DesktopConnection []string    `json:"desktopConnection"`
 	TunnelUser        string      `json:"tunnelUser"`
 	// DesktopProvision / DesktopProvisionInput are the fields of the setup wizard's answer and input,
-	// ProvisionSteps its steps in order (desktop/internal/provision.Steps).
-	DesktopProvision      []string `json:"desktopProvision"`
-	DesktopProvisionInput []string `json:"desktopProvisionInput"`
-	ProvisionSteps        []string `json:"provisionSteps"`
+	// ProvisionSteps its steps in order (desktop/internal/provision.Steps), ProvisionSubsteps the substeps of the steps
+	// that report them, in script order (desktop/internal/provision.Substeps).
+	DesktopProvision      []string            `json:"desktopProvision"`
+	DesktopProvisionInput []string            `json:"desktopProvisionInput"`
+	ProvisionSteps        []string            `json:"provisionSteps"`
+	ProvisionSubsteps     map[string][]string `json:"provisionSubsteps"`
 	// DesktopArchive / DesktopArchiveInput are the fields of POST /desktop/archive's answer and input (the project's ZIP
 	// saved by the app, desktop/internal/remote/archive.go).
 	DesktopArchive      []string `json:"desktopArchive"`
