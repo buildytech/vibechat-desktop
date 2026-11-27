@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -112,5 +113,33 @@ func TestSandboxJSONKeepsNetworkClosed(t *testing.T) {
 	}
 	if _, ok := v["networkPolicy"]; ok {
 		t.Fatal("network policy must not be set")
+	}
+}
+
+func TestEnsureNodeLinksBun(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no symlink shim on Windows")
+	}
+	dir := t.TempDir()
+	bun := filepath.Join(dir, "bun")
+	if err := os.WriteFile(bun, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	look := func(name string) (string, error) {
+		p := filepath.Join(dir, name)
+		if _, err := os.Stat(p); err != nil {
+			return "", os.ErrNotExist
+		}
+		return p, nil
+	}
+	got, err := EnsureNode(look)
+	if err != nil || got != filepath.Join(dir, "node") {
+		t.Fatalf("EnsureNode = %q, %v", got, err)
+	}
+	if target, _ := os.Readlink(got); target != "bun" {
+		t.Fatalf("node links to %q", target)
+	}
+	if again, err := EnsureNode(look); err != nil || again != got {
+		t.Fatalf("second EnsureNode = %q, %v", again, err)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -28,6 +29,7 @@ import (
 	"github.com/buildytech/vibechat-desktop/server/internal/hostwire"
 	"github.com/buildytech/vibechat-desktop/server/internal/isolate"
 	"github.com/buildytech/vibechat-desktop/server/internal/preview"
+	"github.com/buildytech/vibechat-desktop/server/internal/sandbox"
 )
 
 func envOr(name, def string) string {
@@ -142,6 +144,12 @@ func serve(p paths, args []string, stderr io.Writer) int {
 		log.Printf("WARNING: project tools run with a clean environment only, not isolated from the data folder: %v", err)
 	default:
 		log.Printf("project tools: %s", mode)
+	}
+	// The container has Bun only: node → bun, so the checks' `#!/usr/bin/env node` tools run (agent and Studio).
+	if node, err := sandbox.EnsureNode(exec.LookPath); err != nil {
+		log.Printf("node: %v", err)
+	} else if node != "" {
+		log.Printf("node: %s", node)
 	}
 	gw := preview.NewGateway(logf, previewPort)
 	h, closeHost, err := hostwire.New(seam, hostwire.Config{

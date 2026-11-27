@@ -82,3 +82,25 @@ func CheckWorkspace(root string) error {
 	}
 	return nil
 }
+
+// EnsureNode makes `node` resolve on PATH when only Bun is installed (the server container has no Node.js): a
+// node → bun symlink beside bun. Bun runs as Node when called by that name, so the template checks whose tools
+// start with `#!/usr/bin/env node` (ui8px, ui8kit, svelte-check, called by `bun scripts/…` or by the agent's
+// shell) work. It answers the node path, "" when neither exists; nothing changes when node is already there.
+func EnsureNode(lookPath func(string) (string, error)) (string, error) {
+	if runtime.GOOS == "windows" {
+		return "", nil
+	}
+	if p, err := lookPath("node"); err == nil {
+		return p, nil
+	}
+	bun, err := lookPath("bun")
+	if err != nil {
+		return "", nil
+	}
+	link := filepath.Join(filepath.Dir(bun), "node")
+	if err := os.Symlink(filepath.Base(bun), link); err != nil && !os.IsExist(err) {
+		return "", fmt.Errorf("node → bun symlink in %s: %v", filepath.Dir(bun), err)
+	}
+	return link, nil
+}
