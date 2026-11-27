@@ -19,6 +19,9 @@ func TestGoIsProvisioned(t *testing.T) {
 			t.Fatalf("DefaultDomains lacks %s", d)
 		}
 	}
+	if GoVersion != gopin.Version || GoURL != gopin.URL || GoSHA256 != gopin.SHA256 || GoDir != gopin.Dir {
+		t.Fatal("the provision Go pin differs from internal/gopin")
+	}
 	w := &wizard{}
 	v := w.serverVars()
 	if v["GO_SHA"] != gopin.SHA256 || v["GO_URL"] != gopin.URL || v["GO_VERSION"] != gopin.Version || v["GO_DIR"] != gopin.Dir {

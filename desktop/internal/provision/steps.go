@@ -12,8 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/buildytech/vibechat-desktop/internal/gopin"
 )
 
 var (
@@ -47,6 +45,15 @@ const (
 	BunVersion = "1.3.9"
 	BunURL     = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.9/bun-linux-x64-baseline.zip"
 	BunSHA256  = "104d4d037f4b35e10215c0507e1779691f39c57bd91ddeefe11cad781e3fc4b9"
+)
+
+// Go for templ projects in the container: the server's pin (internal/gopin, which the desktop app does not link;
+// TestGoIsProvisioned keeps the two equal), installed into GoDir/go.
+const (
+	GoVersion = "1.27.4"
+	GoURL     = "https://dl.google.com/go/go1.27.4.linux-amd64.tar.gz"
+	GoSHA256  = "7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840"
+	GoDir     = "/opt/vibechat"
 )
 
 // Limits of the user's container: at most LimitCPU CPUs and LimitMemory, and on a smaller host min(LimitCPU, nproc)
@@ -294,7 +301,7 @@ func containerVars() map[string]string {
 
 func (w *wizard) serverVars() map[string]string {
 	return map[string]string{"DEB_URL": w.cfg.DebURL, "SUMS_URL": w.cfg.SumsURL, "BUN_URL": BunURL, "BUN_SHA": BunSHA256, "BUN_VERSION": BunVersion,
-		"GO_URL": gopin.URL, "GO_SHA": gopin.SHA256, "GO_VERSION": gopin.Version, "GO_DIR": gopin.Dir}
+		"GO_URL": GoURL, "GO_SHA": GoSHA256, "GO_VERSION": GoVersion, "GO_DIR": GoDir}
 }
 
 const sumsLine = `awk '$2 ~ /^\*?vibechat-server-linux-amd64\.deb$/' "$work/SHA256SUMS"`
