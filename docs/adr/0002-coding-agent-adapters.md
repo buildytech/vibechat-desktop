@@ -1,6 +1,6 @@
 # ADR 0002: Coding-agent adapters, contour-based runtime (EU/US = Cursor SDK, RU = Pi)
 
-Status: accepted. Step 1 (the adapter, no behavior change) is in this commit; steps 2 and 3 are open (see Plan).
+Status: accepted. Step 1 (the adapter seam, no behavior change) and step 2 (the Pi adapter, provider gateway, contour config; tested without provider keys) are implemented; step 3 and the live run are open (see Plan and "Step 2: what is verified").
 
 Scope: VibeChat only (this repo's server and the Studio it serves). BuildY chat is a separate system of model providers (xAI-compatible: Grok API, OpenRouter) and is not touched here.
 
@@ -42,10 +42,68 @@ server/internal/codingagent/cursor/     the Cursor SDK runtime (moved from inter
 
 ## Plan
 
-- **Step 1 (done, this commit):** the seam, `cursor.Adapter`, goldens, `Session.Runtime`, this ADR.
-- **Step 2:** `codingagent/pi` adapter. Pi runs as `pi --mode rpc` inside `internal/isolate` (bwrap, no network except the host-side provider gateway, no secrets in env or argv, Node ≥ 22.19). Maps Pi RPC events to the closed event set. Golden run for acceptance: create a file, edit, run shell, cancel, resume, big output, refuse to leave the worktree, `isolationCheck` (no secrets), egress to one host only. Server config: `runtime` per contour, `models.json` per contour, per-contour egress ACL (Incus) allowing only the selected provider's hosts.
+- **Step 1 (done):** the seam, `cursor.Adapter`, goldens, `Session.Runtime`, this ADR.
+- **Step 2 (done, without provider keys):** `codingagent/pi`, `providergw` (Yandex pass-through, GigaChat translator), `contour` config, `fetch-pi`, `egress-domains`, doctor checks. See the next section. Open for the live run: real Yandex/GigaChat calls, the model choice, the egress ACL applied on the RU server.
 - **Step 3:** Settings section "Coding agent" (runtime of this server, provider, key, check), Studio badges from `Capabilities`, `modelSource` added to the wire additively if the Studio needs it.
 - Not planned: removing the Cursor bridge, `bridge.lock.json`, the `cursor-sdk/cursor` slot or `/me/cursor`.
+
+## Step 2: the Pi adapter (implemented)
+
+```
+server/internal/codingagent/pi/         the Pi runtime
+  pi.lock.json     pinned @earendil-works/pi-coding-agent 1.7.0 (npm tarball, sha512 integrity, Node >= 22.19.0)
+  install.go       Extract (verify + safe unpack + marker), Locate (Node version, pinned package, marker)
+  models.go        ModelEntry, ValidateModels, ModelsJSON (generated per run)
+  rpc.go           JSONL framing (LF only), command writer
+  translate.go     Pi records -> the closed event set
+  adapter.go run.go  Adapter, one jailed `pi --mode rpc` process per run
+server/internal/providergw/             host-side provider gateway (loopback)
+  gateway.go       listener, per-run tokens, request log without headers/bodies
+  upstream.go      host-allowlist HTTP client (egress), optional CA bundle
+  yandex.go        Yandex AI Studio pass-through (Api-Key, OpenAI-Project, x-data-logging-enabled: false)
+  gigachat.go      GigaChat translator + OAuth token refresh
+  models.go        model id -> provider model name, unknown models refused
+  stub/            OpenAI-compatible and GigaChat-format stub providers for tests
+server/internal/contour/                contour.json -> runtime, provider, models; Build; EgressHosts
+server/cmd/fetch-pi/                    download (or -tarball), verify, install; -verify
+```
+
+**Run model.** Open (per prompt) checks the model and the resume handle and starts nothing. Start launches one `node <pi>/dist/bundle/cli.js --mode rpc` per run inside `isolate.Command` with `RequireJail`: bubblewrap, clean environment, the server's data folder replaced by an empty tmpfs, the chat's workspace writable, the chat's Pi session folder writable (`<data>/agents/pi/sessions/<handle>`, so resume is Pi's own `--session-id`), the per-run agent folder writable and deleted after the run, Node's folder and the Pi package read-only. Flags: `--provider vibechat --model <id> --thinking off --no-extensions --no-skills --no-prompt-templates --no-themes --no-mcp --no-approve --offline`: nothing project-local is loaded (an extension could register another provider), Pi talks to the one generated provider. Cancel sends `abort`; the context is the hard stop (abort, then SIGTERM/SIGKILL of the process group after a grace period). A dialog request from Pi is answered `cancelled`. A record over 16 MB, a crash before `agent_settled`, or a refused prompt is a run error with Pi's stderr (the gateway token redacted). The session handle is a random 128-bit hex string; a chat keeps its runtime for good, and Pi refuses a handle that is not its own.
+
+**Fail closed.** `Ready()` is nil only with: bubblewrap working (`isolate.JailAvailable`), Node >= 22.19.0 (a Bun shim answering `node --version` fails), Pi at exactly the pinned version with the marker fetch-pi writes after the integrity check, at least one valid model, a provider, and the provider's key in the server environment. Anything else leaves the agent off with the reason ("The agent is off on this machine: ..."); there is no fallback to Cursor, to an unjailed Pi or to another provider. `isolate.Command` refuses `RequireJail` programs without bwrap even when the process-wide Require is off.
+
+**Secrets.** Provider keys exist only in the server's environment (`VIBECHAT_YANDEX_API_KEY`, `VIBECHAT_GIGACHAT_AUTH_KEY`; the unit's `EnvironmentFile`, 0600) and are read per request by the gateway. `contour.json` is parsed strictly (unknown fields are errors, so a pasted key is rejected and not echoed). Pi's `models.json` has `baseUrl` = the loopback gateway and `apiKey: "$VIBECHAT_GATEWAY_KEY"`; the variable holds a random per-run token that opens only the gateway and only while the run lasts. Neither argv nor any file nor any log line holds a provider key or the token. Pi never sees the provider's model name (the gateway swaps it; a model outside the config is refused with 400).
+
+**Event mapping** (golden-tested against a capture of the real Pi, `testdata/real-run.jsonl`, plus synthetic and aborted streams): `message_update/text_delta` -> `message.delta`; `thinking_delta`/`thinking_end` -> `thinking.delta`/`thinking.completed` (duration measured); `tool_execution_start/update/end` -> `tool.started/delta/finished` (`bash` is `shell`, `read/write/edit/ls` are `file`, `grep/find` are `search`; shell output is delta-ed from the partial results; a failed tool has `error: ...` as detail); assistant `message_end` usage -> cumulative `usage`; `agent_settled` ends the run; an aborted run is `Result.Error = "cancelled"`; a provider error or a failed retry is the error text. `files.changed` and `session.status` stay the host's (it lands the worktree and publishes them, as for Cursor). Everything else Pi emits (queue, compaction, retry start, extension and session-info records, the tool-call argument stream) has no event on the contract and is dropped. Only writes inside the workspace count as changed files.
+
+**Gateway.** One loopback listener per server, `POST /v1/chat/completions`, bearer = a live run token. Yandex is a pass-through (body and SSE stream unchanged) with `Authorization: Api-Key`, `OpenAI-Project: <folder>` and `x-data-logging-enabled: false` unless `keepLogging`. GigaChat: `tools` -> `functions`, `tool_choice` -> `function_call`, assistant `tool_calls` -> one `function_call` message per call, role `tool` -> role `function` (non-JSON results wrapped as `{"result": ...}`), arguments object <-> JSON string, the whole-call stream chunk -> OpenAI tool-call deltas with `finish_reason: tool_calls` and usage, OpenAI-only fields dropped, OAuth token fetched with the authorization key, kept for its 30 minutes, renewed a minute early and once on a 401. `functions_state_id` is carried inside the tool-call id and sent back. The upstream client dials only the provider's hosts (and no redirect to another host); GigaChat can add the Russian root CA bundle (`caFile`); a missing bundle is an error, never a fallback to system roots.
+
+**Contour config** (`<data>/contour.json`, or `VIBECHAT_CONTOUR_FILE`; no file = the Cursor contour, as before). `hostwire.Config.Contour`; the Pi adapter is registered next to the Cursor adapter, the contour's runtime is the default for new chats. Example (RU, Yandex; one provider only):
+
+```json
+{"contour": "ru", "runtime": "pi", "provider": "yandex",
+ "pi": {"node": "/opt/node/bin/node", "dir": "/opt/vibechat/pi"},
+ "yandex": {"folderId": "b1g...", "models": [
+   {"id": "yandexgpt", "label": "YandexGPT", "upstream": "gpt://{folder}/yandexgpt/rc", "contextWindow": 32000, "maxTokens": 8192}]}}
+```
+
+**Egress.** `vibechat-server egress-domains` prints the hosts the contour's agent traffic may reach: Yandex `ai.api.cloud.yandex.net`; GigaChat `api.giga.chat`, `ngw.devices.sberbank.ru`; nothing else, and only the chosen provider's. The server owner applies them to the container's network policy (the existing Incus ACL machinery of the desktop provisioning is not changed by this step). `vibechat-server doctor` checks the contour, the jail, Node, the pinned Pi, the provider key and prints the same list.
+
+**Install.** `go run ./cmd/fetch-pi -out <dir>` (or `-tarball f.tgz` offline) downloads the pinned npm tarball, checks its sha512 against `pi.lock.json`, unpacks it (files and folders only, nothing outside `package/`) and writes `.vibechat-pi.json`; `-verify <dir>` runs the server's own check. Node is not installed by this step.
+
+### Step 2: what is verified (no provider keys, a box with bwrap and Node 22.23.5)
+
+- Real Pi 1.7.0 in the real jail against the stub provider through the real gateway (`VIBECHAT_PI_DIR`, optional `VIBECHAT_PI_NODE`; they skip without it): write a file with streamed tool calls, resume keeping the conversation, the agent's shell sees neither the provider key nor the data folder, cancel of a 60-second shell call, a provider 403 becoming the run error, the same through the GigaChat translator and OAuth; and through the host routes (project, session, prompt, SSE events, landing of the change, no Pi key slot in Settings).
+- Always running: a fake Pi process (the test binary) in the real jail observed from inside (argv flags, environment without the key, `models.json` without any secret, hidden data folder, read-only Pi folder, token revoked and run folder removed afterwards, abort honored or killed, dialogs cancelled, 2.5 MB records with U+2028, over-limit records, crash with redacted stderr), fail-closed matrix, install and Node-version checks, unsafe tarballs, framing, model validation, contour validation and egress lists, golden event mapping, gateway token, Yandex pass-through and header injection, GigaChat request/response/stream translation, token refresh and the 401 retry, the host-allowlist client, `isolate` `ReadOnly` and `RequireJail`.
+
+### Gaps (cannot be known without real keys; all fail visibly, none silently)
+
+1. **GigaChat tool round-trip.** The documented format is implemented and stub-tested, but `functions_state_id` handling, schema limits of GigaChat-2 (union types), and the behavior of tool loops with real answers are unverified. Needs the golden live run.
+2. **Yandex specifics.** Whether the endpoint accepts `stream_options.include_usage` and `max_tokens` as Pi sends them, the exact model URIs and their tool-call quality over long loops, and the logging terms of `x-data-logging-enabled`. `compat` can be tuned per provider (the generator takes extra compat fields) once seen live.
+3. **Gateway token in the agent shell.** Pi's bash tool inherits Pi's environment, so the per-run gateway token is readable by the agent. It is loopback-only and dies with the run, but while the run lasts the agent can call the gateway (and so spend the provider quota) outside Pi, and the jail shares the host network (Pi needs TCP to the loopback gateway), so other loopback services are reachable (the API needs the host token). Next hardening: a unix socket or a network namespace with only the gateway forwarded.
+4. **Network egress of the jail** is limited by the server's container policy, not by the jail: `egress-domains` is the list to apply; applying it on the RU server and testing it is open.
+5. **Git in a worktree chat.** The worktree's `.git` file points into the project folder, which is hidden in the jail, so `git` inside Pi's shell may not work there; the host lands and commits the worktree itself. To be checked live.
+6. **Windows and macOS** have no jail: Pi is Linux-only by design (Ready fails closed elsewhere).
 
 ## RU contour spike: GigaChat vs Yandex AI Studio (from official docs, no API calls, no keys used)
 
@@ -63,7 +121,7 @@ What Pi needs from a provider (Pi docs, `models.json`): `baseUrl`, `"api": "open
 
 **Recommendation: default = Yandex AI Studio via Pi `openai-completions`.** It is the only one of the two that works with Pi's request format as is, with a static key (no refresh), the OpenAI tool format and parallel calls. GigaChat is the second provider, behind the same gateway.
 
-**Host-side provider gateway (for step 2, recommended for both).** A small Go listener in `vibechat-server` (loopback only) that Pi's `baseUrl` points to: it injects the real credential, so the isolated Pi process never holds a provider secret and its only egress is the loopback port; for GigaChat it also refreshes the 30-minute token and translates `tools` ↔ `functions`, `tool_calls` ↔ `function_call` (object ↔ JSON string arguments, role `tool` ↔ `function`) in both the plain and the SSE path. The community proxy `gpt2giga` (MIT, Python) already maps OpenAI tools/streaming to GigaChat and bundles the Russian root CA; it is a reference and a fallback, but a Python process is an extra runtime on the server, so the Go gateway is preferred. A Pi extension with `registerProvider` is the alternative if the gateway is rejected, but the token then lives inside the sandbox.
+**Host-side provider gateway (implemented in step 2, used for both).** A small Go listener in `vibechat-server` (loopback only) that Pi's `baseUrl` points to: it injects the real credential, so the isolated Pi process never holds a provider secret and its only egress is the loopback port; for GigaChat it also refreshes the 30-minute token and translates `tools` ↔ `functions`, `tool_calls` ↔ `function_call` (object ↔ JSON string arguments, role `tool` ↔ `function`) in both the plain and the SSE path. The community proxy `gpt2giga` (MIT, Python) already maps OpenAI tools/streaming to GigaChat and bundles the Russian root CA; it is a reference and a fallback, but a Python process is an extra runtime on the server, so the Go gateway is preferred. A Pi extension with `registerProvider` is the alternative if the gateway is rejected, but the token then lives inside the sandbox.
 
 **What the owner provides (keys never go through chat or this repo):**
 - Yandex Cloud: a cloud and folder with billing, the folder id, a service account with role `ai.languageModels.user`, an API key with scope `yc.ai.foundationModels.execute`; the list of models to offer (ids as `gpt://<folder>/<model>/<version>`). Optional: confirm the data-logging terms.
@@ -75,7 +133,7 @@ What Pi needs from a provider (Pi docs, `models.json`): `baseUrl`, `"api": "open
 
 - One more concept (`Session.Runtime`), one more registry; the wire and the Studio are unchanged.
 - A host built for the RU contour does not contain or contact the Cursor SDK; EU/US builds keep it.
-- Pi's security rests on our isolation (no sandbox of its own): the risk of step 2 and the reason for the gateway and the per-contour egress ACL.
+- Pi's security rests on our isolation (no sandbox of its own): the reason for the jail-only rule, the gateway and the per-contour egress ACL (see Gaps 3 and 4 for what remains).
 
 ## Sources (checked 2026-11-28)
 
