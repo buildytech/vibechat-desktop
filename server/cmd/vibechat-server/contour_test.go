@@ -83,3 +83,37 @@ func TestDoctorContourChecks(t *testing.T) {
 		}
 	}
 }
+
+// Several providers: doctor names each one, the default first, and says per provider whether its key is there; the
+// egress line is the union of the hosts.
+func TestDoctorContourChecksOfSeveralProviders(t *testing.T) {
+	t.Setenv("VIBECHAT_PI_DIR", "")
+	t.Setenv("VIBECHAT_PI_NODE", "")
+	t.Setenv("VIBECHAT_CLOUDRU_KEY", "")
+	t.Setenv("VIBECHAT_OPENROUTER_KEY", "or-set")
+	doc := `{"contour":"ru","runtime":"pi","provider":"openai","openai":[
+	 {"id":"cloudru","baseUrl":"https://foundation-models.api.cloud.ru/v1","keyEnv":"VIBECHAT_CLOUDRU_KEY","models":[{"id":"giga"}]},
+	 {"id":"openrouter","baseUrl":"https://openrouter.ai/api/v1","keyEnv":"VIBECHAT_OPENROUTER_KEY","models":[{"id":"oss"}]}]}`
+	var provs []check
+	var egress, contourLine check
+	for _, c := range contourChecks(contourPaths(t, doc)) {
+		switch c.name {
+		case "pi provider":
+			provs = append(provs, c)
+		case "egress":
+			egress = c
+		case "contour":
+			contourLine = c
+		}
+	}
+	if len(provs) != 2 || provs[0].level != "warn" || !strings.HasPrefix(provs[0].detail, "cloudru (default): ") ||
+		provs[1].level != "ok" || !strings.HasPrefix(provs[1].detail, "openrouter: key present") {
+		t.Fatalf("%+v", provs)
+	}
+	if egress.detail != "open only: foundation-models.api.cloud.ru, openrouter.ai" || !strings.Contains(contourLine.detail, "provider cloudru, openrouter") {
+		t.Fatalf("%+v %+v", egress, contourLine)
+	}
+	if strings.Contains(provs[1].detail, "or-set") {
+		t.Fatal("a key is in the doctor output")
+	}
+}

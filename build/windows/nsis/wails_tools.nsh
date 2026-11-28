@@ -14,7 +14,7 @@
     !define INFO_PRODUCTNAME "BuildY VibeChat"
 !endif
 !ifndef INFO_PRODUCTVERSION
-    !define INFO_PRODUCTVERSION "0.2.12"
+    !define INFO_PRODUCTVERSION "0.2.13"
 !endif
 !ifndef INFO_COPYRIGHT
     !define INFO_COPYRIGHT "© 2026 BuildY"

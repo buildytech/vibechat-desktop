@@ -11,6 +11,7 @@ import (
 	"github.com/buildytech/vibechat-desktop/server/internal/codingagent/pi"
 	"github.com/buildytech/vibechat-desktop/server/internal/contour"
 	"github.com/buildytech/vibechat-desktop/server/internal/isolate"
+	"github.com/buildytech/vibechat-desktop/server/internal/providergw"
 )
 
 // contourFile is the server's contour config (VIBECHAT_CONTOUR_FILE overrides <data>/contour.json). It holds no secret.
@@ -64,7 +65,7 @@ func contourChecks(p paths) []check {
 	if name == "" {
 		name = "custom"
 	}
-	cs := []check{ok("contour", fmt.Sprintf("%s: runtime pi, provider %s (%s)", name, c.ProviderName(), p.contourFile()))}
+	cs := []check{ok("contour", fmt.Sprintf("%s: runtime pi, provider %s (%s)", name, strings.Join(c.ProviderIDs(), ", "), p.contourFile()))}
 	if err := isolate.JailAvailable(); err != nil {
 		cs = append(cs, bad("pi jail", "Pi runs only in bubblewrap: "+err.Error()))
 	} else {
@@ -91,7 +92,19 @@ func contourChecks(p paths) []check {
 	if err != nil {
 		return append(cs, bad("pi provider", err.Error()))
 	}
-	if err := prov.Ready(); err != nil {
+	if parts := providergw.Parts(prov); len(parts) > 0 {
+		for i, part := range parts {
+			label := part.Provider.Name()
+			if i == 0 {
+				label += " (default)"
+			}
+			if err := part.Provider.Ready(); err != nil {
+				cs = append(cs, warn("pi provider", label+": "+err.Error()+" (the key is read from the service's environment; run doctor with it to check)"))
+			} else {
+				cs = append(cs, ok("pi provider", label+": key present in this environment"))
+			}
+		}
+	} else if err := prov.Ready(); err != nil {
 		cs = append(cs, warn("pi provider", err.Error()+" (the key is read from the service's environment; run doctor with it to check)"))
 	} else {
 		cs = append(cs, ok("pi provider", c.ProviderName()+": key present in this environment"))

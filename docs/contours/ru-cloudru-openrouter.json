@@ -1,0 +1,29 @@
+{
+  "contour": "ru",
+  "runtime": "pi",
+  "provider": "openai",
+  "pi": { "node": "/opt/vibechat/node/bin/node", "dir": "/opt/vibechat/pi" },
+  "openai": [
+    {
+      "id": "cloudru",
+      "label": "Cloud.ru GigaChat-4",
+      "baseUrl": "https://foundation-models.api.cloud.ru/v1",
+      "keyEnv": "VIBECHAT_CLOUDRU_KEY",
+      "quirks": { "echoFields": ["tool_state_id"] },
+      "body": { "provider": { "sort": "price" } },
+      "models": [
+        { "id": "gigachat-4", "label": "GigaChat-4 708B", "upstream": "GigaChat/GigaChat-4-708B-A41", "contextWindow": 1000000, "maxTokens": 8192 }
+      ]
+    },
+    {
+      "id": "openrouter",
+      "label": "OpenRouter",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "keyEnv": "VIBECHAT_OPENROUTER_KEY",
+      "headers": { "X-Title": "BuildY VibeChat" },
+      "models": [
+        { "id": "gpt-oss-120b", "label": "gpt-oss-120b", "upstream": "openai/gpt-oss-120b", "contextWindow": 131072, "maxTokens": 8192 }
+      ]
+    }
+  ]
+}

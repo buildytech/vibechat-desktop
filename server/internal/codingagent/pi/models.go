@@ -21,6 +21,21 @@ type ModelEntry struct {
 	MaxTokens     int    `json:"maxTokens,omitempty"`
 	Reasoning     bool   `json:"reasoning,omitempty"`
 	Images        bool   `json:"images,omitempty"`
+
+	// Provider is the provider id of the menu entry when the contour has several ("cloudru", "openrouter"); "" = the
+	// adapter's Options.Provider. Set by the contour package, not by the config file.
+	Provider string `json:"-"`
+	// Compat overrides single keys of the compat block for this model (the contour package fills it from its
+	// provider's block when there are several providers).
+	Compat map[string]any `json:"-"`
+}
+
+// provider is the provider id of a menu entry.
+func (m ModelEntry) provider(def string) string {
+	if m.Provider != "" {
+		return m.Provider
+	}
+	return def
 }
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -53,7 +68,8 @@ const ProviderID = "vibechat"
 func Menu(provider string, ms []ModelEntry) []codingagent.Model {
 	out := make([]codingagent.Model, 0, len(ms))
 	for _, m := range ms {
-		out = append(out, codingagent.Model{ID: provider + "/" + m.ID, Provider: provider, Label: firstNonEmpty(m.Label, m.ID)})
+		p := m.provider(provider)
+		out = append(out, codingagent.Model{ID: p + "/" + m.ID, Provider: p, Label: firstNonEmpty(m.Label, m.ID)})
 	}
 	return out
 }
@@ -85,6 +101,9 @@ func ModelsJSON(provider, baseURL string, ms []ModelEntry, extraCompat map[strin
 		}
 		if m.MaxTokens > 0 {
 			e["maxTokens"] = m.MaxTokens
+		}
+		if len(m.Compat) > 0 {
+			e["compat"] = m.Compat
 		}
 		models = append(models, e)
 	}

@@ -3,6 +3,7 @@ package providergw
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -29,6 +30,12 @@ type OpenAICompat struct {
 	// UniqueToolCallIDs makes tool-call ids unique (for providers that answer with the function name as the id) and
 	// maps them back on the next request.
 	UniqueToolCallIDs bool
+	// EchoFields are message fields outside the OpenAI format that the provider wants back with the next request
+	// (see toolids.go).
+	EchoFields []string
+	// ExtraBody holds request fields the provider takes beyond the OpenAI ones ({"provider":{"sort":"price"}}); a field
+	// the agent's request already has wins.
+	ExtraBody map[string]json.RawMessage
 	// NoKey lets a keyless endpoint (an internal gateway) work.
 	NoKey  bool
 	Client *http.Client
@@ -89,13 +96,61 @@ func (o *OpenAICompat) Ready() error {
 	return nil
 }
 
+// ReservedBodyFields are the request fields the agent and the gateway own: a provider entry cannot preset them.
+var ReservedBodyFields = map[string]bool{"model": true, "messages": true, "tools": true, "tool_choice": true, "stream": true,
+	"stream_options": true, "max_tokens": true, "max_completion_tokens": true}
+
+// ValidateExtraBody checks the preset request fields of a provider entry.
+func ValidateExtraBody(m map[string]json.RawMessage) error {
+	for k := range m {
+		if !echoFieldName.MatchString(k) {
+			return fmt.Errorf("body field %q: lower-case letters, digits and '_'", k)
+		}
+		if ReservedBodyFields[k] {
+			return fmt.Errorf("body field %q belongs to the agent's request and cannot be preset", k)
+		}
+	}
+	return nil
+}
+
+func (o *OpenAICompat) rewrites() *rewriter {
+	if !o.UniqueToolCallIDs && len(o.EchoFields) == 0 {
+		return nil
+	}
+	return &rewriter{unique: o.UniqueToolCallIDs, echo: o.EchoFields}
+}
+
+// withExtraBody adds the preset fields the request does not have.
+func (o *OpenAICompat) withExtraBody(body []byte) ([]byte, error) {
+	if len(o.ExtraBody) == 0 {
+		return body, nil
+	}
+	var req map[string]json.RawMessage
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, err
+	}
+	for k, v := range o.ExtraBody {
+		if _, set := req[k]; !set {
+			req[k] = v
+		}
+	}
+	return json.Marshal(req)
+}
+
 func (o *OpenAICompat) Chat(ctx context.Context, body []byte, w http.ResponseWriter) error {
-	if o.UniqueToolCallIDs {
+	rw := o.rewrites()
+	if rw != nil {
 		var err error
-		if body, err = RestoreToolIDs(body); err != nil {
+		if body, err = restoreRequest(body, o.EchoFields); err != nil {
 			WriteError(w, http.StatusBadRequest, "the request is not a JSON object")
 			return nil
 		}
+	}
+	if b, err := o.withExtraBody(body); err != nil {
+		WriteError(w, http.StatusBadRequest, "the request is not a JSON object")
+		return nil
+	} else {
+		body = b
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.base()+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
@@ -125,8 +180,8 @@ func (o *OpenAICompat) Chat(ctx context.Context, body []byte, w http.ResponseWri
 		return err
 	}
 	defer resp.Body.Close()
-	if o.UniqueToolCallIDs {
-		return forwardAnswer(w, resp)
+	if rw.active() {
+		return forwardAnswer(w, resp, rw)
 	}
 	return passAnswer(w, resp)
 }

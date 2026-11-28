@@ -65,3 +65,30 @@ func TestValidateModels(t *testing.T) {
 		}
 	}
 }
+
+// A contour with several providers: the menu carries each model's own provider id, and a provider's compat keys ride on
+// its models only.
+func TestMenuAndModelsJSONOfSeveralProviders(t *testing.T) {
+	ms := []ModelEntry{{ID: "giga", Label: "GigaChat-4", Provider: "cloudru"},
+		{ID: "oss", Label: "gpt-oss", Provider: "openrouter", Compat: map[string]any{"supportsDeveloperRole": true}}}
+	menu := Menu("cloudru", ms)
+	if len(menu) != 2 || menu[0].ID != "cloudru/giga" || menu[1].ID != "openrouter/oss" || menu[1].Provider != "openrouter" {
+		t.Fatalf("%+v", menu)
+	}
+	raw, err := ModelsJSON("Cloud.ru · OpenRouter", "http://127.0.0.1:18199/v1", ms, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Providers map[string]struct {
+			Models []map[string]any `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	got := doc.Providers[ProviderID].Models
+	if len(got) != 2 || got[0]["compat"] != nil || got[1]["compat"].(map[string]any)["supportsDeveloperRole"] != true {
+		t.Fatalf("%s", raw)
+	}
+}

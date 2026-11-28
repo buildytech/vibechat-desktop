@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"regexp"
@@ -38,7 +39,34 @@ type Config struct {
 	Pi       PiConfig        `json:"pi,omitempty"`
 	Yandex   *YandexConfig   `json:"yandex,omitempty"`
 	GigaChat *GigaChatConfig `json:"gigachat,omitempty"`
-	OpenAI   *OpenAIConfig   `json:"openai,omitempty"`
+	// OpenAI is one provider block or a list of them; the first is the default, the menu follows the list.
+	OpenAI OpenAIList `json:"openai,omitempty"`
+}
+
+// OpenAIList is the "openai" key: one block, or an array of blocks when the contour offers models of several
+// OpenAI-compatible providers (Cloud.ru first, OpenRouter second).
+type OpenAIList []*OpenAIConfig
+
+func (l *OpenAIList) UnmarshalJSON(raw []byte) error {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) > 0 && raw[0] == '[' {
+		var many []*OpenAIConfig
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&many); err != nil {
+			return err
+		}
+		*l = many
+		return nil
+	}
+	var one OpenAIConfig
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&one); err != nil {
+		return err
+	}
+	*l = OpenAIList{&one}
+	return nil
 }
 
 // OpenAIConfig is any OpenAI-compatible provider (gpt-oss-120b on a Russian cloud, a vLLM gateway, ...) described by
@@ -58,6 +86,9 @@ type OpenAIConfig struct {
 	Headers map[string]string `json:"headers,omitempty"`
 	// Quirks are the provider's known deviations the gateway irons out.
 	Quirks QuirkConfig `json:"quirks,omitempty"`
+	// Body presets request fields the provider takes beyond the OpenAI ones, e.g. {"provider":{"sort":"price"}}. A field
+	// the agent's request already has wins; model, messages, tools, stream and the token limits cannot be preset.
+	Body map[string]json.RawMessage `json:"body,omitempty"`
 	// Compat overrides single keys of Pi's models.json compat block (supportsDeveloperRole, maxTokensField, ...).
 	Compat map[string]any `json:"compat,omitempty"`
 	// CAFile is an extra CA bundle (PEM) for a provider behind a private or Russian trusted root.
@@ -76,6 +107,9 @@ type QuirkConfig struct {
 	// UniqueToolCallIds: the provider answers tool calls with a non-unique id (Yandex: the function name); the gateway
 	// makes them unique and maps them back.
 	UniqueToolCallIds bool `json:"uniqueToolCallIds,omitempty"`
+	// EchoFields lists message fields outside the OpenAI format that the provider returns with a tool call and wants
+	// back on the next request (Cloud.ru GigaChat: ["tool_state_id"]). The gateway carries them inside the tool-call ids.
+	EchoFields []string `json:"echoFields,omitempty"`
 }
 
 // PiConfig locates the runtime: the Node binary and the folder fetch-pi installed Pi into.
@@ -155,7 +189,7 @@ func (c Config) UsesPi() bool { return c.RuntimeID() == codingagent.RuntimePi }
 func (c Config) Validate() error {
 	switch c.RuntimeID() {
 	case codingagent.RuntimeCursorSDK:
-		if c.Provider != "" || c.Yandex != nil || c.GigaChat != nil || c.OpenAI != nil {
+		if c.Provider != "" || c.Yandex != nil || c.GigaChat != nil || len(c.OpenAI) > 0 {
 			return errors.New(`runtime "cursor-sdk" takes no provider: remove "provider", "yandex", "gigachat" and "openai", or set "runtime": "pi"`)
 		}
 		return nil
@@ -169,7 +203,7 @@ func (c Config) Validate() error {
 		if y == nil {
 			return errors.New(`provider "yandex" needs a "yandex" block`)
 		}
-		if c.GigaChat != nil || c.OpenAI != nil {
+		if c.GigaChat != nil || len(c.OpenAI) > 0 {
 			return errors.New(`one provider only: remove the other provider blocks (egress is opened for the chosen provider alone)`)
 		}
 		if !folderPattern.MatchString(y.FolderID) {
@@ -184,7 +218,7 @@ func (c Config) Validate() error {
 		if g == nil {
 			return errors.New(`provider "gigachat" needs a "gigachat" block`)
 		}
-		if c.Yandex != nil || c.OpenAI != nil {
+		if c.Yandex != nil || len(c.OpenAI) > 0 {
 			return errors.New(`one provider only: remove the other provider blocks (egress is opened for the chosen provider alone)`)
 		}
 		if !scopes[g.Scope] {
@@ -198,14 +232,32 @@ func (c Config) Validate() error {
 		}
 		return pi.ValidateModels(g.Models)
 	case "openai":
-		o := c.OpenAI
-		if o == nil {
+		if len(c.OpenAI) == 0 {
 			return errors.New(`provider "openai" needs an "openai" block`)
 		}
 		if c.Yandex != nil || c.GigaChat != nil {
 			return errors.New(`one provider only: remove the other provider blocks (egress is opened for the chosen provider alone)`)
 		}
-		return o.validate()
+		ids, models := map[string]bool{}, map[string]string{}
+		for _, o := range c.OpenAI {
+			if o == nil {
+				return errors.New(`openai: an empty provider block`)
+			}
+			if err := o.validate(); err != nil {
+				return err
+			}
+			if ids[o.ID] {
+				return fmt.Errorf("openai.id %q is listed twice", o.ID)
+			}
+			ids[o.ID] = true
+			for _, m := range o.Models {
+				if other, dup := models[m.ID]; dup {
+					return fmt.Errorf("model id %q is in both %s and %s: ids are unique across the providers", m.ID, other, o.ID)
+				}
+				models[m.ID] = o.ID
+			}
+		}
+		return nil
 	case "":
 		return errors.New(`runtime "pi" needs "provider": "yandex", "gigachat" or "openai"`)
 	}
@@ -239,24 +291,43 @@ func (o *OpenAIConfig) validate() error {
 	if err := providergw.ValidateHeaders(o.Headers); err != nil {
 		return fmt.Errorf("openai.headers: %v", err)
 	}
+	if err := providergw.ValidateEchoFields(o.Quirks.EchoFields); err != nil {
+		return fmt.Errorf("openai.quirks: %v", err)
+	}
+	if err := providergw.ValidateExtraBody(o.Body); err != nil {
+		return fmt.Errorf("openai.body: %v", err)
+	}
 	if err := pi.ValidateCompat(o.Compat); err != nil {
 		return fmt.Errorf("openai.compat: %v", err)
 	}
 	return pi.ValidateModels(o.Models)
 }
 
-// ProviderName is the provider id of the model menu: the preset's name, or the id of an "openai" block.
+// ProviderName is the provider id of the model menu: the preset's name, or the id of the (first) "openai" block, the
+// default provider.
 func (c Config) ProviderName() string {
-	if c.Provider == "openai" && c.OpenAI != nil {
-		return c.OpenAI.ID
+	if c.Provider == "openai" && len(c.OpenAI) > 0 {
+		return c.OpenAI[0].ID
 	}
 	return c.Provider
 }
 
-// Compat is the models.json compat overrides of the provider.
+// ProviderIDs are all the provider ids of the menu, default first.
+func (c Config) ProviderIDs() []string {
+	if c.Provider == "openai" {
+		ids := make([]string, 0, len(c.OpenAI))
+		for _, o := range c.OpenAI {
+			ids = append(ids, o.ID)
+		}
+		return ids
+	}
+	return []string{c.Provider}
+}
+
+// Compat is the models.json compat overrides of the provider (a contour with several providers carries them per model).
 func (c Config) Compat() map[string]any {
-	if c.Provider == "openai" && c.OpenAI != nil {
-		return c.OpenAI.Compat
+	if c.Provider == "openai" && len(c.OpenAI) == 1 {
+		return c.OpenAI[0].Compat
 	}
 	return nil
 }
@@ -285,6 +356,8 @@ type Env struct {
 	LookPath pi.LookPath
 	DataDir  string
 	Log      func(string)
+	// WrapTransport (a test seam) wraps the HTTP transport of the OpenAI-compatible providers, e.g. to record bodies.
+	WrapTransport func(http.RoundTripper) http.RoundTripper
 }
 
 // Provider builds the chosen provider with its credential read from the environment per call (nothing is stored).
@@ -317,21 +390,51 @@ func (c Config) BuildProvider(env Env) (providergw.Provider, []pi.ModelEntry, er
 		models, ids := resolve(g.Models, "")
 		return providergw.WithModels(prov, ids), models, nil
 	case "openai":
-		o := c.OpenAI
-		client, err := providergw.NewClient((&providergw.OpenAICompat{BaseURL: o.BaseURL}).Hosts(), o.CAFile)
+		var parts []providergw.Part
+		var all []pi.ModelEntry
+		for _, o := range c.OpenAI {
+			prov, err := o.build(getenv, env.WrapTransport)
+			if err != nil {
+				return nil, nil, err
+			}
+			models, ids := resolve(o.Models, "")
+			for i := range models {
+				models[i].Provider = o.ID
+				if len(c.OpenAI) > 1 {
+					models[i].Compat = o.Compat
+				}
+			}
+			if len(c.OpenAI) == 1 {
+				return providergw.WithModels(prov, ids), models, nil
+			}
+			parts = append(parts, providergw.Part{Provider: prov, Models: ids})
+			all = append(all, models...)
+		}
+		routed, err := providergw.Route(parts...)
 		if err != nil {
 			return nil, nil, err
 		}
-		prov := &providergw.OpenAICompat{ID: o.ID, BaseURL: o.BaseURL, NoKey: o.NoKey, Headers: o.Headers,
-			UniqueToolCallIDs: o.Quirks.UniqueToolCallIds, Client: client,
-			Key: func() string { return strings.TrimSpace(getenv(o.KeyEnv)) }}
-		if o.Auth != nil {
-			prov.AuthHeader, prov.AuthScheme = o.Auth.Header, o.Auth.Scheme
-		}
-		models, ids := resolve(o.Models, "")
-		return providergw.WithModels(prov, ids), models, nil
+		return routed, all, nil
 	}
 	return nil, nil, fmt.Errorf("unknown provider %q", c.Provider)
+}
+
+// build is the provider of one "openai" block, its credential read from the environment per call.
+func (o *OpenAIConfig) build(getenv func(string) string, wrap func(http.RoundTripper) http.RoundTripper) (*providergw.OpenAICompat, error) {
+	client, err := providergw.NewClient((&providergw.OpenAICompat{BaseURL: o.BaseURL}).Hosts(), o.CAFile)
+	if err != nil {
+		return nil, err
+	}
+	if wrap != nil {
+		client.Transport = wrap(client.Transport)
+	}
+	prov := &providergw.OpenAICompat{ID: o.ID, BaseURL: o.BaseURL, NoKey: o.NoKey, Headers: o.Headers,
+		UniqueToolCallIDs: o.Quirks.UniqueToolCallIds, EchoFields: o.Quirks.EchoFields, ExtraBody: o.Body, Client: client,
+		Key: func() string { return strings.TrimSpace(getenv(o.KeyEnv)) }}
+	if o.Auth != nil {
+		prov.AuthHeader, prov.AuthScheme = o.Auth.Header, o.Auth.Scheme
+	}
+	return prov, nil
 }
 
 func hostsOf(p providergw.Provider) []string { return p.Hosts() }
@@ -393,7 +496,11 @@ func Build(c Config, env Env) (*pi.Adapter, error) {
 	install, locErr := pi.Locate(pi.PinnedLock(), node, dir, env.LookPath)
 	label := "Pi · " + map[string]string{"yandex": "Yandex AI Studio", "gigachat": "GigaChat"}[c.Provider]
 	if c.Provider == "openai" {
-		label = "Pi · " + firstNonEmpty(c.OpenAI.Label, c.OpenAI.ID)
+		names := make([]string, 0, len(c.OpenAI))
+		for _, o := range c.OpenAI {
+			names = append(names, firstNonEmpty(o.Label, o.ID))
+		}
+		label = "Pi · " + strings.Join(names, " · ")
 	}
 	return pi.New(pi.Options{
 		Label: label, Provider: c.ProviderName(), Compat: c.Compat(), DataDir: env.DataDir, Install: install, LocateErr: locErr,

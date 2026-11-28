@@ -50,6 +50,9 @@ type Server struct {
 	// NameAsID makes the OpenAI stub answer tool calls the way Yandex AI Studio does: id == function name (not unique),
 	// every streamed call whole in one chunk with its index.
 	NameAsID bool
+	// StateField makes the OpenAI stub answer the way Cloud.ru GigaChat does: every answer with tool calls carries a state
+	// id of its own in this field of the message (of the delta, whole call in one chunk, when streaming).
+	StateField string
 	// TokenTTL is how long an issued token lives (GigaChat stub); 0 = 30 minutes.
 	TokenTTL time.Duration
 	tokens   map[string]time.Time
@@ -93,6 +96,9 @@ func (s *Server) callID(i int) string {
 	return fmt.Sprintf("call_%d_%d", n, i)
 }
 
+// StateField is an option of OpenAI: a provider that keeps conversation state in a non-standard message field.
+func StateField(name string) func(*Server) { return func(s *Server) { s.StateField = name } }
+
 // NameAsID is an option of OpenAI: the Yandex tool-call id quirk.
 func NameAsID(s *Server) { s.NameAsID = true }
 
@@ -131,6 +137,9 @@ func OpenAI(script Script, opts ...func(*Server)) *Server {
 			msg := map[string]any{"role": "assistant", "content": rep.Text}
 			if len(calls) > 0 {
 				msg["tool_calls"] = calls
+				if s.StateField != "" {
+					msg[s.StateField] = fmt.Sprintf("st-%d", n)
+				}
 			}
 			w.Header().Set("content-type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "stub", "object": "chat.completion", "created": 1, "model": model,
@@ -158,6 +167,10 @@ func OpenAI(script Script, opts ...func(*Server)) *Server {
 			cm := c.(map[string]any)
 			f := cm["function"].(map[string]any)
 			args := f["arguments"].(string)
+			if s.StateField != "" {
+				send(chunk(map[string]any{s.StateField: fmt.Sprintf("st-%d", n), "tool_calls": []any{map[string]any{"index": cm["index"], "id": cm["id"], "type": "function", "function": map[string]any{"name": f["name"], "arguments": args}}}}, nil))
+				continue
+			}
 			if s.NameAsID {
 				send(chunk(map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"index": cm["index"], "id": cm["id"], "type": "function", "function": map[string]any{"name": f["name"], "arguments": args}}}}, nil))
 				continue

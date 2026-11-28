@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/buildytech/vibechat-desktop/server/internal/codingagent"
@@ -141,12 +140,8 @@ func (a *Adapter) DefaultModel() codingagent.Model {
 }
 
 func (a *Adapter) entry(modelID string) (ModelEntry, bool) {
-	id, ok := strings.CutPrefix(modelID, a.o.Provider+"/")
-	if !ok {
-		return ModelEntry{}, false
-	}
 	for _, m := range a.o.Models {
-		if m.ID == id {
+		if modelID == m.provider(a.o.Provider)+"/"+m.ID {
 			return m, true
 		}
 	}

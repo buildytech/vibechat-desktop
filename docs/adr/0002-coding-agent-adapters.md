@@ -171,6 +171,41 @@ pass in the container as the `vibechat` user. The running service is still 0.2.1
 with this code (tag, then `vibechat-server update`) and `contour.json` (a prepared `contour.json.openrouter-pilot` sits next to the
 data; `runtime: pi` moves new chats from Cursor to Pi). Not done on purpose: the release.
 
+## Step 5: Cloud.ru Foundation Models (GigaChat-4), several providers in one contour (2026-11-28)
+
+**Cloud.ru is data, not code.** `https://foundation-models.api.cloud.ru/v1` is OpenAI-compatible (`Authorization: Bearer`), so it is one
+`openai` block (`docs/contours/ru-cloudru-openrouter.json`): model `GigaChat/GigaChat-4-708B-A41` (context 1,000,000 per the provider's model
+list), key variable `VIBECHAT_CLOUDRU_KEY`. Observed with real calls: tool calls come back whole in one chunk with a UUID id (unique, no
+rewrite needed) and `finish_reason: tool_calls`; the message carries two non-standard fields, `reasoning` (streamed as `delta.reasoning`)
+and `tool_state_id` (on the delta that has the tool calls, and on the final `stop` delta); usage arrives in the last chunk with
+`cached_tokens`. The `provider: {sort: "price"}` extension is accepted (it was sent on every request of the live runs).
+
+**Quirk handling, generic and opt-in.**
+- `reasoning` needs nothing: Pi's OpenAI-completions reader already takes `reasoning_content`, `reasoning` and `reasoning_text`, and the run shows
+  `thinking.delta` events.
+- `tool_state_id`: verified both ways with the real Pi, three steps (write, edit, bash) in one resumed chat. **Without** echoing it the
+  multi-turn tool use works (5 tool calls, all steps pass). **With** it (`quirks.echoFields: ["tool_state_id"]`) it works too (29 replayed assistant
+  tool-call messages sent upstream, every one carrying the field; the provider never sees the gateway's ids). It is a generic flag, not
+  provider code: the gateway carries the named fields inside the tool-call ids it hands to the agent (`vx.<base64url JSON>.<id>`, stateless like the
+  Yandex ids, so a resumed chat or a restart loses nothing) and puts them back as fields of the assistant message, with the original ids, on the
+  next request. Only the configured names are restored (never `role`, `content` or other message-format fields), only plain values up to 128
+  characters. A field that arrives in a stream chunk after the tool calls is not carried (the provider's own does come with them).
+  The pilot config turns it on: the provider sends the state for a reason, and the cost is a longer id.
+- `body` presets request fields beyond the OpenAI ones (`{"provider":{"sort":"price"}}`); a field the agent's request has wins, and `model`,
+  `messages`, `tools`, `tool_choice`, `stream`, `stream_options` and the token limits cannot be preset.
+
+**Several providers in one contour; the first is the default.** `openai` may be one block or an array. The Studio's menu follows the list
+(`cloudru/gigachat-4` first, `openrouter/gpt-oss-120b` second), so Cloud.ru GigaChat-4 is what a new chat runs. The gateway routes each request
+by its model to the provider that owns it (`providergw.Route`), with that provider's key, headers, quirks and model name; a provider whose key is
+missing refuses only its own models (503 naming it) and does not switch the others off. Model ids are unique across the providers; a provider's
+`compat` rides on its own models in Pi's `models.json`. Egress is the union of the providers' hosts (`vibechat-server egress-domains`), and `doctor`
+reports each provider's key on a line of its own, the default marked.
+
+Tests: gateway (echo on/off x plain/stream x unique ids on/off, allow-list and forged ids, `body` presets, routing and the missing-key case),
+contour (list and single block, validation, menu and default, the shipped example file), doctor (several providers), and `TestLiveContour`
+(`VIBECHAT_LIVE=1`, off by default; real Pi, a contour file, the three steps; `VIBECHAT_LIVE_ENVMAP` reads the keys from variables of another
+name, `VIBECHAT_LIVE_DUMP` records bodies, never headers).
+
 ## RU contour spike: GigaChat vs Yandex AI Studio (from official docs, no API calls, no keys used)
 
 What Pi needs from a provider (Pi docs, `models.json`): `baseUrl`, `"api": "openai-completions"` (or `openai-responses`), `apiKey` as a literal, `$ENV` or `!command` (run at request time, not cached), headers with the same interpolation. Coding needs OpenAI-style `tools` / `tool_calls` and SSE streaming.
