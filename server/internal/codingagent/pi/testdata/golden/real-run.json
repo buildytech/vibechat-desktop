@@ -1,0 +1,196 @@
+{
+  "events": [
+    {
+      "role": "assistant",
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "Listing ",
+      "type": "message.delta"
+    },
+    {
+      "role": "assistant",
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "first. ",
+      "type": "message.delta"
+    },
+    {
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "reasoningTokens": 0,
+      "runId": "r1",
+      "sessionId": "s1",
+      "tokensIn": 11,
+      "tokensOut": 7,
+      "totalTokens": 18,
+      "type": "usage"
+    },
+    {
+      "callId": "call_1_0",
+      "kind": "shell",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "echo one; sleep 0.3; echo two",
+      "tool": "shell",
+      "type": "tool.started"
+    },
+    {
+      "callId": "call_1_0",
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "one\n",
+      "tool": "shell",
+      "type": "tool.delta"
+    },
+    {
+      "callId": "call_1_0",
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "two\n",
+      "tool": "shell",
+      "type": "tool.delta"
+    },
+    {
+      "callId": "call_1_0",
+      "detail": "one\ntwo",
+      "kind": "shell",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "echo one; sleep 0.3; echo two",
+      "tool": "shell",
+      "type": "tool.finished"
+    },
+    {
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "reasoningTokens": 0,
+      "runId": "r1",
+      "sessionId": "s1",
+      "tokensIn": 22,
+      "tokensOut": 14,
+      "totalTokens": 36,
+      "type": "usage"
+    },
+    {
+      "callId": "call_2_0",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "write notes/a.txt",
+      "tool": "write",
+      "type": "tool.started"
+    },
+    {
+      "callId": "call_2_0",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "write notes/a.txt",
+      "tool": "write",
+      "type": "tool.finished"
+    },
+    {
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "reasoningTokens": 0,
+      "runId": "r1",
+      "sessionId": "s1",
+      "tokensIn": 33,
+      "tokensOut": 21,
+      "totalTokens": 54,
+      "type": "usage"
+    },
+    {
+      "callId": "call_3_0",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "edit notes/a.txt",
+      "tool": "edit",
+      "type": "tool.started"
+    },
+    {
+      "callId": "call_3_0",
+      "detail": "-1 alpha\n+1 beta",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "edit notes/a.txt",
+      "tool": "edit",
+      "type": "tool.finished"
+    },
+    {
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "reasoningTokens": 0,
+      "runId": "r1",
+      "sessionId": "s1",
+      "tokensIn": 44,
+      "tokensOut": 28,
+      "totalTokens": 72,
+      "type": "usage"
+    },
+    {
+      "callId": "call_4_0",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "read missing.txt",
+      "tool": "read",
+      "type": "tool.started"
+    },
+    {
+      "callId": "call_4_0",
+      "detail": "error: ENOENT: no such file or directory, access '/W/ws/missing.txt'",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "read missing.txt",
+      "tool": "read",
+      "type": "tool.finished"
+    },
+    {
+      "role": "assistant",
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "All ",
+      "type": "message.delta"
+    },
+    {
+      "role": "assistant",
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "done.",
+      "type": "message.delta"
+    },
+    {
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "reasoningTokens": 0,
+      "runId": "r1",
+      "sessionId": "s1",
+      "tokensIn": 55,
+      "tokensOut": 35,
+      "totalTokens": 90,
+      "type": "usage"
+    }
+  ],
+  "run": {
+    "error": "",
+    "files": [
+      "notes/a.txt"
+    ],
+    "settled": true,
+    "summary": "All done.",
+    "text": "Listing first. All done.",
+    "toolCalls": 4,
+    "usage": {
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "inputTokens": 55,
+      "outputTokens": 35,
+      "reasoningTokens": 0,
+      "totalTokens": 90
+    }
+  }
+}

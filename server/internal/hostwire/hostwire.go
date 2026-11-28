@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/buildytech/vibechat-desktop/server/internal/bridge"
 	"github.com/buildytech/vibechat-desktop/server/internal/codingagent"
 	"github.com/buildytech/vibechat-desktop/server/internal/codingagent/cursor"
+	"github.com/buildytech/vibechat-desktop/server/internal/contour"
 	"github.com/buildytech/vibechat-desktop/server/internal/host"
 	"github.com/buildytech/vibechat-desktop/server/internal/secrets"
 	"github.com/buildytech/vibechat-desktop/server/internal/store"
@@ -36,9 +38,12 @@ type Config struct {
 	DataDir, ProjectsDir string
 	// Keys stores the Cursor key (secrets.File).
 	Keys codingagent.KeyStore
-	// Runtime is the coding-agent runtime of new chats (the server's contour config): "" = cursor-sdk. A runtime this
-	// build does not have is an error at start, never a silent fallback to another provider.
+	// Runtime is the coding-agent runtime of new chats: "" = the contour's (cursor-sdk without a contour file). A runtime
+	// this build does not have is an error at start, never a silent fallback to another provider.
 	Runtime string
+	// Contour is the server's contour config (contour.json): EU/US run the Cursor SDK, RU runs Pi (ADR 0002). The zero
+	// value is the Cursor contour. Pi is registered alongside the Cursor adapter, never instead of it.
+	Contour contour.Config
 	// Preview runs dev servers (preview.NewGateway: one gateway port for every preview).
 	Preview host.Preview
 	// InstanceID, PreviewPort and Tickets: see host.Options (server only).
@@ -63,7 +68,25 @@ func New(seam host.Seam, c Config) (*host.Host, func(), error) {
 	} else {
 		log.Printf("agent: cursor-sdk-bridge %s with the SDK sandbox", install.Manifest.Describe())
 	}
-	agents, err := codingagent.NewRegistry(c.Runtime, cursor.NewAdapter(runner, c.Keys))
+	adapters := []codingagent.Adapter{cursor.NewAdapter(runner, c.Keys)}
+	def := c.Runtime
+	if def == "" {
+		def = c.Contour.RuntimeID()
+	}
+	if c.Contour.UsesPi() {
+		pa, err := contour.Build(c.Contour, contour.Env{LookPath: exec.LookPath, DataDir: c.DataDir, Log: logf})
+		if err != nil {
+			runner.Close()
+			return nil, nil, fmt.Errorf("contour config: %w", err)
+		}
+		if err := pa.Ready(); err != nil {
+			log.Printf("agent pi disabled (fail closed): %v", err)
+		} else {
+			log.Printf("agent: %s, %s", pa.Capabilities().Label, pa.Install().Describe())
+		}
+		adapters = append(adapters, pa)
+	}
+	agents, err := codingagent.NewRegistry(def, adapters...)
 	if err != nil {
 		runner.Close()
 		return nil, nil, fmt.Errorf("coding agent runtime: %w", err)

@@ -1,0 +1,31 @@
+{
+  "events": [
+    {
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "reasoningTokens": 0,
+      "runId": "r1",
+      "sessionId": "s1",
+      "tokensIn": 1,
+      "tokensOut": 1,
+      "totalTokens": 2,
+      "type": "usage"
+    }
+  ],
+  "run": {
+    "error": "cancelled",
+    "files": [],
+    "settled": true,
+    "summary": "partial",
+    "text": "",
+    "toolCalls": 0,
+    "usage": {
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "inputTokens": 1,
+      "outputTokens": 1,
+      "reasoningTokens": 0,
+      "totalTokens": 2
+    }
+  }
+}

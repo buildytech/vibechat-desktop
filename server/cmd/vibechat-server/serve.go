@@ -156,8 +156,13 @@ func serve(p paths, args []string, stderr io.Writer) int {
 		log.Printf("node: %s", node)
 	}
 	gw := preview.NewGateway(logf, previewPort)
+	cont, err := loadContour(p)
+	if err != nil {
+		return fail(fmt.Errorf("contour: %w", err))
+	}
+	log.Printf("contour: runtime %s%s", cont.RuntimeID(), map[bool]string{true: ", provider " + cont.Provider, false: ""}[cont.UsesPi()])
 	h, closeHost, err := hostwire.New(seam, hostwire.Config{
-		DataDir: p.data, ProjectsDir: p.projects, Keys: keys, Preview: gw,
+		DataDir: p.data, ProjectsDir: p.projects, Keys: keys, Preview: gw, Contour: cont,
 		InstanceID: id, PreviewPort: previewPort, Tickets: ta,
 	})
 	if err != nil {

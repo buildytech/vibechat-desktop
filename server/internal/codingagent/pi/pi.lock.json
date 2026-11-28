@@ -1,0 +1,8 @@
+{
+  "package": "@earendil-works/pi-coding-agent",
+  "version": "1.7.0",
+  "tarball": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-1.7.0.tgz",
+  "integrity": "sha512-opRelA1oqV/o+cByICMYU87oiHuICeCkghHMqsZsDwDz9F6qo8HFhoH4J/wZkr6tBeFor7ryOSwEmpZsusYrbA==",
+  "entry": "dist/bundle/cli.js",
+  "node": "22.19.0"
+}

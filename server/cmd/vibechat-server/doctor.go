@@ -70,6 +70,7 @@ func doctor(p paths, listen string, out io.Writer) int {
 	} else {
 		cs = append(cs, ok("cursor key", p.cursorKey()+" (0600)"))
 	}
+	cs = append(cs, contourChecks(p)...)
 	cs = append(cs, kernelChecks()...)
 	cs = append(cs, sandboxCheck(p))
 	cs = append(cs, isolationCheck(p))

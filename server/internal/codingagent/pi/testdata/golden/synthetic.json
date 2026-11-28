@@ -1,0 +1,248 @@
+{
+  "events": [
+    {
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "Let me think. ",
+      "type": "thinking.delta"
+    },
+    {
+      "durationMs": 250,
+      "runId": "r1",
+      "sessionId": "s1",
+      "type": "thinking.completed"
+    },
+    {
+      "runId": "r1",
+      "sessionId": "s1",
+      "type": "thinking.completed"
+    },
+    {
+      "role": "assistant",
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "Line one\u2028still line one\n",
+      "type": "message.delta"
+    },
+    {
+      "cacheReadTokens": 50,
+      "cacheWriteTokens": 5,
+      "reasoningTokens": 0,
+      "runId": "r1",
+      "sessionId": "s1",
+      "tokensIn": 100,
+      "tokensOut": 20,
+      "totalTokens": 175,
+      "type": "usage"
+    },
+    {
+      "callId": "t1",
+      "kind": "shell",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "npm test --silent",
+      "tool": "shell",
+      "type": "tool.started"
+    },
+    {
+      "callId": "t1",
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "a\n",
+      "tool": "shell",
+      "type": "tool.delta"
+    },
+    {
+      "callId": "t1",
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "b\n",
+      "tool": "shell",
+      "type": "tool.delta"
+    },
+    {
+      "callId": "t1",
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "tail only\n",
+      "tool": "shell",
+      "type": "tool.delta"
+    },
+    {
+      "callId": "t1",
+      "detail": "tail only",
+      "kind": "shell",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "npm test --silent",
+      "tool": "shell",
+      "type": "tool.finished"
+    },
+    {
+      "callId": "t2",
+      "kind": "search",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "TODO",
+      "tool": "grep",
+      "type": "tool.started"
+    },
+    {
+      "callId": "t2",
+      "kind": "search",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "TODO",
+      "tool": "grep",
+      "type": "tool.finished"
+    },
+    {
+      "callId": "t3",
+      "kind": "search",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "*.go",
+      "tool": "find",
+      "type": "tool.started"
+    },
+    {
+      "callId": "t3",
+      "kind": "search",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "*.go",
+      "tool": "find",
+      "type": "tool.finished"
+    },
+    {
+      "callId": "t4",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "ls src",
+      "tool": "ls",
+      "type": "tool.started"
+    },
+    {
+      "callId": "t4",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "ls src",
+      "tool": "ls",
+      "type": "tool.finished"
+    },
+    {
+      "callId": "t5",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "write out/new.txt",
+      "tool": "write",
+      "type": "tool.started"
+    },
+    {
+      "callId": "t5",
+      "detail": "error: EACCES: permission denied",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "write out/new.txt",
+      "tool": "write",
+      "type": "tool.finished"
+    },
+    {
+      "callId": "t6",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "write ../outside.txt",
+      "tool": "write",
+      "type": "tool.started"
+    },
+    {
+      "callId": "t6",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "write ../outside.txt",
+      "tool": "write",
+      "type": "tool.finished"
+    },
+    {
+      "callId": "t7",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "edit main.go",
+      "tool": "edit",
+      "type": "tool.started"
+    },
+    {
+      "callId": "t7",
+      "detail": "-1 a\n+1 b",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "edit main.go",
+      "tool": "edit",
+      "type": "tool.finished"
+    },
+    {
+      "callId": "t8",
+      "kind": "tool",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "mcp__docs__search",
+      "tool": "mcp__docs__search",
+      "type": "tool.started"
+    },
+    {
+      "callId": "t8",
+      "kind": "tool",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "mcp__docs__search",
+      "tool": "mcp__docs__search",
+      "type": "tool.finished"
+    },
+    {
+      "callId": "never-started",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "read",
+      "tool": "read",
+      "type": "tool.finished"
+    },
+    {
+      "cacheReadTokens": 50,
+      "cacheWriteTokens": 5,
+      "reasoningTokens": 0,
+      "runId": "r1",
+      "sessionId": "s1",
+      "tokensIn": 100,
+      "tokensOut": 20,
+      "totalTokens": 175,
+      "type": "usage"
+    }
+  ],
+  "run": {
+    "error": "401 invalid key",
+    "files": [
+      "main.go"
+    ],
+    "settled": true,
+    "summary": "Line one\u2028still line one\n",
+    "text": "Line one\u2028still line one\n",
+    "toolCalls": 8,
+    "usage": {
+      "cacheReadTokens": 50,
+      "cacheWriteTokens": 5,
+      "inputTokens": 100,
+      "outputTokens": 20,
+      "reasoningTokens": 0,
+      "totalTokens": 175
+    }
+  }
+}

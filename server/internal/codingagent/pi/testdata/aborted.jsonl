@@ -1,0 +1,3 @@
+{"type": "message_end", "message": {"role": "assistant", "content": [{"type": "text", "text": "partial"}], "stopReason": "aborted", "usage": {"input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0}}}
+{"type": "agent_end", "messages": [], "willRetry": false}
+{"type": "agent_settled", "aborted": true}

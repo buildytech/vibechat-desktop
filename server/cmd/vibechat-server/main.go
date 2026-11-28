@@ -9,6 +9,7 @@
 //	vibechat-server set-key      read the Cursor API key from stdin into the server's key file
 //	vibechat-server forget-key   remove it
 //	vibechat-server doctor       check this machine: bridge + SDK sandbox preflight, Landlock, user namespaces, tools
+//	vibechat-server egress-domains  the provider hosts the RU contour (Pi) may reach, one per line (contour.json)
 //	vibechat-server update       install the newest official release if it is newer (vibechat-update.timer, root)
 //	vibechat-server ensure-go    install the pinned Go toolchain for Go templ projects (root; the wizard, update)
 //	vibechat-server go-dev --port N  the live preview loop of a Go templ project (the go-templ runner, in the jail)
@@ -95,6 +96,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	case "doctor":
 		return doctor(p, defaultListen, stdout)
+	case "egress-domains":
+		return egressDomains(p, stdout, stderr)
 	case "update":
 		return update(args, stdout, stderr)
 	case "ensure-go":
@@ -106,7 +109,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "--bridge-smoke":
 		return hostwire.BridgeSmoke(p.data, "stderr")
 	case "-h", "--help", "help":
-		fmt.Fprintln(stdout, "vibechat-server [serve | token new | set-key | forget-key | doctor | update | ensure-go | go-dev | --check-key | --version]")
+		fmt.Fprintln(stdout, "vibechat-server [serve | token new | set-key | forget-key | doctor | egress-domains | update | ensure-go | go-dev | --check-key | --version]")
 		return 0
 	}
 	fmt.Fprintf(stderr, "vibechat-server: unknown command %q (try --help)\n", cmd)

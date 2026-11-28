@@ -40,6 +40,11 @@ type Spec struct {
 	Dir      string   // the project folder: the working directory, read-write
 	Writable []string // more read-write folders (the Bun cache for an install)
 	Env      []string // KEY=VALUE on top of the clean environment
+	// ReadOnly are more folders bound read-only (a runtime that lives under the hidden data folder: Node, Pi).
+	ReadOnly []string
+	// RequireJail refuses to run without bubblewrap whatever Config.Require says (and on non-Linux systems): the
+	// coding agent of the RU contour never runs outside the jail.
+	RequireJail bool
 }
 
 // Modes reported by Command.
@@ -228,6 +233,20 @@ func probe() (string, error) {
 	return path, nil
 }
 
+// JailAvailable is nil when bubblewrap works here (Linux only): what a program with Spec.RequireJail needs.
+func JailAvailable() error {
+	if runtime.GOOS != "linux" {
+		return errors.New("bubblewrap isolation is Linux only")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !probed {
+		probed = true
+		bwrap, jailOK = probe()
+	}
+	return jailOK
+}
+
 // Command answers the argv and environment that run argv for s: wrapped in bwrap (ModeJail) or as is with the
 // clean environment (ModeCleanEnv). The returned mode is for logs.
 func Command(argv []string, s Spec) (out []string, env []string, mode string, err error) {
@@ -239,6 +258,12 @@ func Command(argv []string, s Spec) (out []string, env []string, mode string, er
 	mode, merr := modeLocked()
 	if mode == "" {
 		return nil, nil, "", merr
+	}
+	if s.RequireJail && mode != ModeJail {
+		if merr == nil {
+			merr = errors.New("bubblewrap isolation is Linux only")
+		}
+		return nil, nil, "", fmt.Errorf("this program must run in the bubblewrap jail and it is not available: %v", merr)
 	}
 	env = CleanEnv(os.Environ(), s.Env...)
 	if mode != ModeJail {
@@ -285,6 +310,14 @@ func Command(argv []string, s Spec) (out []string, env []string, mode string, er
 		d := filepath.Dir(filepath.Clean(exe))
 		if (hidden(d) || d == "/tmp" || strings.HasPrefix(d, "/tmp/")) && !seen[d] {
 			a = append(a, "--ro-bind", d, d)
+		}
+	}
+	for _, r := range s.ReadOnly {
+		if r == "" {
+			continue
+		}
+		if _, err := os.Stat(r); err == nil {
+			a = append(a, "--ro-bind", r, r)
 		}
 	}
 	for _, w := range append(append([]string{}, s.Writable...), dir) {
