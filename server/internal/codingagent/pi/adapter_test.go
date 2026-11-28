@@ -216,17 +216,19 @@ func TestFakePiHardStopWhenItIgnoresAbort(t *testing.T) {
 func TestFailClosed(t *testing.T) {
 	good := fakeInstall(t)
 	cases := map[string]func(o *Options){
-		"no jail":    func(o *Options) { o.Jail = func() error { return errors.New("bwrap not found") } },
-		"no Pi":      func(o *Options) { o.Install = Install{}; o.LocateErr = errors.New("the Pi package folder is not set") },
-		"no models":  func(o *Options) { o.Models = nil },
-		"bad model":  func(o *Options) { o.Models = []ModelEntry{{ID: "Bad Id"}} },
-		"no gateway": func(o *Options) { o.Gateway = nil },
+		"no jail":              func(o *Options) { o.Jail = func() error { return errors.New("bwrap not found") } },
+		"no nested shell jail": func(o *Options) { o.ToolJail = func() error { return errors.New("user namespaces are limited") } },
+		"no Pi":                func(o *Options) { o.Install = Install{}; o.LocateErr = errors.New("the Pi package folder is not set") },
+		"no models":            func(o *Options) { o.Models = nil },
+		"bad model":            func(o *Options) { o.Models = []ModelEntry{{ID: "Bad Id"}} },
+		"no gateway":           func(o *Options) { o.Gateway = nil },
 	}
 	for name, mut := range cases {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, good, okReply)
 			o := h.ad.o
 			o.Jail = func() error { return nil }
+			o.ToolJail = func() error { return nil }
 			mut(&o)
 			ad := New(o)
 			if ad.Ready() == nil {
@@ -239,12 +241,17 @@ func TestFailClosed(t *testing.T) {
 			if name == "no jail" && !strings.Contains(ad.Ready().Error(), "bubblewrap jail") {
 				t.Fatalf("%v", ad.Ready())
 			}
+			if name == "no nested shell jail" && !strings.Contains(ad.Ready().Error(), "nested jail") {
+				t.Fatalf("%v", ad.Ready())
+			}
 		})
 	}
 	t.Run("no provider key", func(t *testing.T) {
 		h := newHarness(t, good, okReply)
 		o := h.ad.o
 		o.Gateway = providergwNoKey(t)
+		o.Jail = func() error { return nil } // the jail is not what this case is about (CI machines have no bwrap)
+		o.ToolJail = func() error { return nil }
 		ad := New(o)
 		if err := ad.Ready(); err == nil || !strings.Contains(err.Error(), "API key is not set") {
 			t.Fatalf("%v", err)
