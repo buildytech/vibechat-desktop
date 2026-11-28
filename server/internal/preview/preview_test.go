@@ -165,3 +165,20 @@ func TestStopKillsDevServer(t *testing.T) {
 		t.Fatal("grant after stop")
 	}
 }
+
+func TestAllowFramingDropsFrameProtections(t *testing.T) {
+	h := http.Header{}
+	h.Set("X-Frame-Options", "DENY")
+	h.Add("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; form-action 'self'")
+	h.Add("Content-Security-Policy", "frame-ancestors 'self'")
+	if err := allowFraming(&http.Response{Header: h}); err != nil {
+		t.Fatal(err)
+	}
+	if h.Get("X-Frame-Options") != "" {
+		t.Fatal("X-Frame-Options kept")
+	}
+	got := h.Values("Content-Security-Policy")
+	if len(got) != 1 || got[0] != "default-src 'self'; form-action 'self'" {
+		t.Fatalf("csp: %q", got)
+	}
+}

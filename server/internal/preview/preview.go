@@ -398,6 +398,34 @@ func (s *server) hasCookie(r *http.Request) bool {
 	return false
 }
 
+// allowFraming lets the Studio iframe show the preview: a site that sets X-Frame-Options or CSP frame-ancestors for
+// production (the Go templ starter sends X-Frame-Options: DENY and frame-ancestors 'none') would otherwise be
+// refused in the frame ("refused to connect"). The gateway only serves a request with a grant, its session cookie or a
+// same-origin mark, so dropping these two protections here does not open the preview to other pages.
+func allowFraming(res *http.Response) error {
+	res.Header.Del("X-Frame-Options")
+	for _, name := range []string{"Content-Security-Policy", "Content-Security-Policy-Report-Only"} {
+		vals := res.Header.Values(name)
+		if len(vals) == 0 {
+			continue
+		}
+		res.Header.Del(name)
+		for _, v := range vals {
+			var keep []string
+			for _, d := range strings.Split(v, ";") {
+				if f := strings.Fields(d); len(f) > 0 && strings.EqualFold(f[0], "frame-ancestors") {
+					continue
+				}
+				keep = append(keep, strings.TrimSpace(d))
+			}
+			if out := strings.Join(keep, "; "); strings.TrimSpace(out) != "" {
+				res.Header.Add(name, out)
+			}
+		}
+	}
+	return nil
+}
+
 const deniedPage = `<!doctype html><meta charset="utf-8"><title>Preview locked</title>
 <body style="font:16px system-ui;padding:32px;background:#111;color:#eee">
 <h1 style="font-size:20px">This preview link has expired</h1>
@@ -420,6 +448,7 @@ func (s *server) handler() http.Handler {
 			r.Header.Set("Origin", target.Scheme+"://"+target.Host)
 		}
 	}
+	rp.ModifyResponse = allowFraming
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		w.Header().Set("content-type", "text/html; charset=utf-8")
 		w.Header().Set("retry-after", "1")
