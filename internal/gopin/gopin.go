@@ -18,6 +18,7 @@ const (
 	Bin  = Root + "/bin"
 )
 
-// Domains are the hosts a Go project needs through the server egress allowlist: the module proxy, the checksum
-// database and the toolchain download.
-var Domains = []string{"proxy.golang.org", "sum.golang.org", "dl.google.com"}
+// Domains are the hosts a Go project needs through the server egress allowlist: the module proxy, the storage the
+// proxy redirects module ZIPs to (proxy.golang.org answers a download with a 302 to storage.googleapis.com), the
+// checksum database and the toolchain download.
+var Domains = []string{"proxy.golang.org", "storage.googleapis.com", "sum.golang.org", "dl.google.com"}

@@ -66,7 +66,8 @@ Adapters in 0.2.8:
   installs; the package's postinstall runs `vibechat-server ensure-go` (a no-op when current; else download, size
   + SHA-256 check, unpack beside, swap), so a server update moves to the next pin. `/opt/vibechat/go/bin` is on the
   unit's PATH; GOROOT is outside the data folder, so the jail sees it read-only.
-- Egress: `proxy.golang.org`, `sum.golang.org`, `dl.google.com` on the allowlist (TCP 443).
+- Egress: `proxy.golang.org`, `storage.googleapis.com` (the proxy answers module ZIP downloads with a redirect there;
+  added in 0.2.9), `sum.golang.org`, `dl.google.com` on the allowlist (TCP 443).
 - Environment of every Go run (`isolate.GoEnv`): one shared `GOPATH`/`GOMODCACHE`/`GOCACHE` under
   `~/.cache/vibechat-go` (bound read-write into the jail), `GOFLAGS=-mod=readonly`, `GOTOOLCHAIN=local`,
   `CGO_ENABLED=0`, `GOPROXY=https://proxy.golang.org`, `GOSUMDB=sum.golang.org`, `GOENV=off`, telemetry off.

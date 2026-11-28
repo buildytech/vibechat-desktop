@@ -98,8 +98,9 @@ var DefaultDomains = []string{
 	"bun.sh",
 	// GitHub (Bun releases, git, vibechat-server updates, the Go templ template at its pinned commit)
 	"github.com", "api.github.com", "codeload.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com",
-	// Go (Go templ projects: the module proxy, the checksum database, the toolchain for ensure-go)
-	"proxy.golang.org", "sum.golang.org", "dl.google.com",
+	// Go (Go templ projects: the module proxy and the storage its module ZIPs redirect to, the checksum database,
+	// the toolchain for ensure-go)
+	"proxy.golang.org", "storage.googleapis.com", "sum.golang.org", "dl.google.com",
 }
 
 // quote is a shell single-quoted word.

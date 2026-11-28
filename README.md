@@ -279,7 +279,7 @@ the IPv4 addresses (/32) of these names, plus DNS to the bridge's dnsmasq:
 `authentication.cursor.sh`, `prod.authentication.cursor.sh` (Cursor's list, cursor.com/docs/enterprise/network-configuration),
 `registry.npmjs.org`, `bun.sh`, and GitHub for Bun / server updates (`github.com`, `api.github.com`,
 `codeload.github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`), and Go
-(`proxy.golang.org`, `sum.golang.org`, `dl.google.com`). The host resolves the
+(`proxy.golang.org`, `storage.googleapis.com` where the proxy redirects module ZIPs, `sum.golang.org`, `dl.google.com`). The host resolves the
 names (`/usr/local/sbin/vibechat-egress`, `vibechat-egress.timer` every 10 min), keeps the union with the previous run
 (CDN rotation; an empty resolution keeps the old ACL) and pins the answers in the container's `/etc/hosts`.
 DNS caveats: the rule is by IP, so another site on the same CDN address is reachable too; a name whose addresses change
