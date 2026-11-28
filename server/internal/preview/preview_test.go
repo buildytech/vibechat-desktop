@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -180,5 +181,24 @@ func TestAllowFramingDropsFrameProtections(t *testing.T) {
 	got := h.Values("Content-Security-Policy")
 	if len(got) != 1 || got[0] != "default-src 'self'; form-action 'self'" {
 		t.Fatalf("csp: %q", got)
+	}
+}
+
+func TestProxyForwardsTheAppsOwnCookiesButNotThePreviewSession(t *testing.T) {
+	m, origin := startFake(t)
+	grant, _, err := m.Grant("p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	if code, _ := get(t, c, grant, nil); code != 200 {
+		t.Fatalf("grant %d", code)
+	}
+	u, _ := url.Parse(origin)
+	jar.SetCookies(u, []*http.Cookie{{Name: "site_session", Value: "abc", Path: "/"}})
+	_, body := get(t, c, origin+"/cabinet", nil)
+	if !strings.Contains(body, "site_session=abc") || strings.Contains(body, "vibechat_preview") {
+		t.Fatalf("the app must get its own cookie and never the preview's: %s", body)
 	}
 }

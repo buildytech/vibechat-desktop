@@ -436,6 +436,20 @@ const notRunningPage = `<!doctype html><meta charset="utf-8"><title>No preview</
 <h1 style="font-size:20px">This preview is not running</h1>
 <p>Start it from VibeChat (Preview → Play).</p></body>`
 
+// dropPreviewCookies keeps the preview's own session cookies away from the dev server (project code must not see the
+// secret that opens the preview) and leaves every other cookie of the app in place: a site's own sign-in session
+// (the Go starter's site_session) has to reach the app.
+func dropPreviewCookies(r *http.Request) {
+	all := r.Cookies()
+	r.Header.Del("Cookie")
+	for _, c := range all {
+		if c.Name == cookieName || c.Name == cookieName+"_lax" {
+			continue
+		}
+		r.AddCookie(c)
+	}
+}
+
 func (s *server) handler() http.Handler {
 	target, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(s.devPort))
 	rp := httputil.NewSingleHostReverseProxy(target)
@@ -443,7 +457,7 @@ func (s *server) handler() http.Handler {
 	rp.Director = func(r *http.Request) {
 		base(r)
 		r.Host = target.Host
-		r.Header.Del("Cookie")
+		dropPreviewCookies(r)
 		if o := r.Header.Get("Origin"); o != "" {
 			r.Header.Set("Origin", target.Scheme+"://"+target.Host)
 		}

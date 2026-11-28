@@ -16,7 +16,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 WAILS3="${WAILS3:-wails3}"
-VERSION="${VIBECHAT_VERSION:-0.2.13}"
+VERSION="${VIBECHAT_VERSION:-0.2.14}"
 export VIBECHAT_VERSION="$VERSION"
 TAGS="production"
 # The status host.version of the build (internal/appid.Version; unstamped builds report "dev").
