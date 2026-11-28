@@ -14,8 +14,8 @@ import (
 	"github.com/buildytech/vibechat-desktop/internal/appid"
 	"github.com/buildytech/vibechat-desktop/internal/gopin"
 	"github.com/buildytech/vibechat-desktop/protocol/auth"
-	"github.com/buildytech/vibechat-desktop/server/internal/agent"
 	"github.com/buildytech/vibechat-desktop/server/internal/bridge"
+	"github.com/buildytech/vibechat-desktop/server/internal/codingagent/cursor"
 	"github.com/buildytech/vibechat-desktop/server/internal/hostwire"
 	"github.com/buildytech/vibechat-desktop/server/internal/isolate"
 	"github.com/buildytech/vibechat-desktop/server/internal/procgroup"
@@ -129,7 +129,7 @@ func sandboxCheck(p paths) check {
 		return bad("sandbox", err.Error())
 	}
 	defer os.RemoveAll(tmp)
-	r := agent.NewRunner(agent.RunnerOptions{Install: install, Located: locErr, Keys: p.keys(), DataDir: tmp, HookExe: exe, Log: func(s string) { log.Print(s) }})
+	r := cursor.NewRunner(cursor.RunnerOptions{Install: install, Located: locErr, Keys: p.keys(), DataDir: tmp, HookExe: exe, Log: func(s string) { log.Print(s) }})
 	defer r.Close()
 	if err := r.SandboxError(); err != nil {
 		return bad("sandbox", err.Error())

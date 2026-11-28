@@ -1,0 +1,188 @@
+{
+  "events": [
+    {
+      "role": "assistant",
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "Hello ",
+      "type": "message.delta"
+    },
+    {
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "hmm",
+      "type": "thinking.delta"
+    },
+    {
+      "runId": "r1",
+      "sessionId": "s1",
+      "type": "thinking.completed"
+    },
+    {
+      "callId": "c1",
+      "kind": "shell",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "npm run build",
+      "tool": "shell",
+      "type": "tool.started"
+    },
+    {
+      "callId": "c1",
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "out\nerr\n",
+      "tool": "shell",
+      "type": "tool.delta"
+    },
+    {
+      "callId": "c1",
+      "runId": "r1",
+      "sessionId": "s1",
+      "text": "plain",
+      "tool": "shell",
+      "type": "tool.delta"
+    },
+    {
+      "callId": "c1",
+      "detail": "done\n\nexit 2",
+      "kind": "shell",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "npm run build",
+      "tool": "shell",
+      "type": "tool.finished"
+    },
+    {
+      "callId": "c2",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "write src/a.ts",
+      "tool": "write",
+      "type": "tool.started"
+    },
+    {
+      "callId": "c2",
+      "detail": "error: denied",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "write src/a.ts",
+      "tool": "write",
+      "type": "tool.finished"
+    },
+    {
+      "callId": "c3",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "delete old.txt",
+      "tool": "delete",
+      "type": "tool.started"
+    },
+    {
+      "callId": "c3",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "delete old.txt",
+      "tool": "delete",
+      "type": "tool.finished"
+    },
+    {
+      "callId": "c4",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "read /outside/x",
+      "tool": "read",
+      "type": "tool.started"
+    },
+    {
+      "callId": "c4",
+      "detail": "d",
+      "kind": "file",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "read /outside/x",
+      "tool": "read",
+      "type": "tool.finished"
+    },
+    {
+      "callId": "c5",
+      "kind": "search",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "TODO",
+      "tool": "grep",
+      "type": "tool.started"
+    },
+    {
+      "callId": "c5",
+      "kind": "search",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "TODO",
+      "tool": "grep",
+      "type": "tool.finished"
+    },
+    {
+      "callId": "c6",
+      "kind": "agent",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "explore",
+      "tool": "task",
+      "type": "tool.started"
+    },
+    {
+      "callId": "c7",
+      "kind": "plan",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "todos",
+      "tool": "updateTodos",
+      "type": "tool.started"
+    },
+    {
+      "callId": "c8",
+      "kind": "tool",
+      "runId": "r1",
+      "sessionId": "s1",
+      "summary": "mcp_thing",
+      "tool": "mcp_thing",
+      "type": "tool.started"
+    },
+    {
+      "cacheReadTokens": 3,
+      "cacheWriteTokens": 1,
+      "reasoningTokens": 2,
+      "runId": "r1",
+      "sessionId": "s1",
+      "tokensIn": 10,
+      "tokensOut": 5,
+      "totalTokens": 19,
+      "type": "usage"
+    }
+  ],
+  "run": {
+    "bridgeRun": "run-syn",
+    "error": "model exploded",
+    "files": [
+      "old.txt"
+    ],
+    "resultText": "partial",
+    "status": "RUN_LIFECYCLE_STATUS_ERROR",
+    "text": "Hello ",
+    "toolCalls": 8,
+    "usage": {
+      "cacheReadTokens": 3,
+      "cacheWriteTokens": 1,
+      "inputTokens": 10,
+      "outputTokens": 5,
+      "reasoningTokens": 2,
+      "totalTokens": 19
+    }
+  }
+}

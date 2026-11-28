@@ -1,4 +1,4 @@
-package agent
+package cursor
 
 import (
 	"bufio"
@@ -17,11 +17,12 @@ func TestTranslateSandboxProbeRun(t *testing.T) {
 	defer f.Close()
 	tr := &Translator{SessionID: "s1", RunID: "r1", Cwd: "/W/ws"}
 	counts := map[string]int{}
-	var tools []Event
+	var tools []map[string]any
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
-		for _, e := range tr.Frame([]byte(sc.Text())) {
+		for _, ev := range tr.Frame([]byte(sc.Text())) {
+			e := ev.Wire()
 			counts[e["type"].(string)]++
 			if e["sessionId"] != "s1" || e["runId"] != "r1" {
 				t.Fatalf("unstamped event %v", e)

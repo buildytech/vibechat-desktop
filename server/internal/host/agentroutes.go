@@ -13,8 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/buildytech/vibechat-desktop/server/internal/agent"
-	"github.com/buildytech/vibechat-desktop/server/internal/sandbox"
+	"github.com/buildytech/vibechat-desktop/server/internal/codingagent"
 	"github.com/buildytech/vibechat-desktop/server/internal/store"
 )
 
@@ -27,10 +26,10 @@ const (
 )
 
 type activeRun struct {
-	runID   string
-	agentID string
-	cancel  context.CancelFunc
-	tr      *agent.Translator
+	runID  string
+	cancel context.CancelFunc
+	// run is the runtime's run, set once it started (nil while the session is being opened).
+	run codingagent.Run
 }
 
 func (h *Host) registerAgent() {
@@ -50,24 +49,38 @@ func (h *Host) agentCapabilities(w http.ResponseWriter, r *http.Request, prm Par
 	if _, ok := h.project(w, prm["id"]); !ok {
 		return
 	}
-	// The menu is the key's model list from Cursor. Without a key or a reachable Cursor only Auto is offered (the
-	// run then reports what is wrong).
-	models := []agent.Model{{ID: agent.AutoID, Provider: "cursor", Label: "Auto"}}
-	if h.opts.Agent != nil && h.opts.Agent.HasKey() && h.opts.Agent.SandboxError() == nil {
-		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-		list, err := h.opts.Agent.Models(ctx)
-		cancel()
-		if err == nil && len(list) > 0 {
-			models = list
-		} else if err != nil {
-			h.logf("model list: %v", err)
+	// The menu is the runtime's own model list. Without a credential or a reachable runtime only its default model is
+	// offered (the run then reports what is wrong).
+	ad := h.adapter(h.opts.Agents.Default())
+	caps := codingagent.LegacyCapabilities
+	models := []codingagent.Model{codingagent.LegacyDefaultModel}
+	if ad != nil {
+		caps = ad.Capabilities()
+		models = []codingagent.Model{ad.DefaultModel()}
+		if ad.HasCredential() && ad.Ready() == nil {
+			ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+			list, err := ad.Models(ctx)
+			cancel()
+			if err == nil && len(list) > 0 {
+				models = list
+			} else if err != nil {
+				h.logf("model list: %v", err)
+			}
 		}
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{
-		"runtime": "cursor-sdk", "runtimeLabel": "Cursor", "streaming": true, "tools": true, "pty": false, "snapshots": false,
-		"cost_usage": false, "evidence_pack": false, "subagents": false, "models": models,
-		"ui": map[string]bool{"showThinking": true, "showToolTrace": true},
+		"runtime": caps.Runtime, "runtimeLabel": caps.Label, "streaming": caps.Streaming, "tools": caps.Tools, "pty": caps.PTY, "snapshots": caps.Snapshots,
+		"cost_usage": caps.CostUsage, "evidence_pack": caps.EvidencePack, "subagents": caps.Subagents, "models": models,
+		"ui": map[string]bool{"showThinking": caps.ShowThinking, "showToolTrace": caps.ShowToolTrace},
 	})
+}
+
+// adapter is the adapter of a runtime (nil when this server has none).
+func (h *Host) adapter(runtime string) codingagent.Adapter { return h.opts.Agents.Of(runtime) }
+
+// adapterOf is the adapter of a chat's own runtime.
+func (h *Host) adapterOf(s store.Session) codingagent.Adapter {
+	return h.adapter(codingagent.RuntimeOf(s.Runtime))
 }
 
 func (h *Host) sessionStatus(sid string) string {
@@ -87,7 +100,7 @@ func (h *Host) sessionJSON(s store.Session) map[string]any {
 	if s.LastMessageAt != "" {
 		last = s.LastMessageAt
 	}
-	return map[string]any{"id": s.ID, "projectId": s.ProjectID, "userId": "local", "runtime": "cursor-sdk", "status": h.sessionStatus(s.ID),
+	return map[string]any{"id": s.ID, "projectId": s.ProjectID, "userId": "local", "runtime": codingagent.RuntimeOf(s.Runtime), "status": h.sessionStatus(s.ID),
 		"title": title, "lastMessageAt": last, "createdAt": s.CreatedAt, "updatedAt": s.UpdatedAt}
 }
 
@@ -117,7 +130,7 @@ func (h *Host) createSession(w http.ResponseWriter, r *http.Request, prm Params)
 		return
 	}
 	now := store.Now()
-	s := store.Session{ID: sid, ProjectID: p.ID, CreatedAt: now, UpdatedAt: now, Branch: branch}
+	s := store.Session{ID: sid, ProjectID: p.ID, CreatedAt: now, UpdatedAt: now, Branch: branch, Runtime: h.opts.Agents.Default()}
 	if dir != p.Path {
 		s.Worktree = dir
 	}
@@ -148,9 +161,12 @@ func (h *Host) stopRun(sid string) {
 	if run == nil {
 		return
 	}
-	if run.tr != nil && run.tr.BridgeRun != "" && h.opts.Agent != nil {
+	h.mu.Lock()
+	started := run.run
+	h.mu.Unlock()
+	if started != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_ = h.opts.Agent.Cancel(ctx, run.agentID, run.tr.BridgeRun)
+		_ = started.Cancel(ctx)
 		cancel()
 	}
 	go func() {
@@ -171,22 +187,25 @@ func (h *Host) deleteSession(w http.ResponseWriter, _ *http.Request, prm Params)
 }
 
 type promptBody struct {
-	Text        string             `json:"text"`
-	ModelID     string             `json:"modelId"`
-	ModelParams []agent.ModelParam `json:"modelParams"`
-	ClientMsgID string             `json:"clientMsgId"`
-	Images      []agent.Image      `json:"images"`
+	Text        string                   `json:"text"`
+	ModelID     string                   `json:"modelId"`
+	ModelParams []codingagent.ModelParam `json:"modelParams"`
+	ClientMsgID string                   `json:"clientMsgId"`
+	Images      []codingagent.Image      `json:"images"`
 }
 
 var imageTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/webp": true, "image/gif": true}
 
-func (b promptBody) validate() error {
+// validate checks the prompt; checkModel is the runtime's own refusal of a model id ("" = fine), nil when there is no runtime.
+func (b promptBody) validate(checkModel func(string) string) error {
 	n := utf8.RuneCountInString(b.Text)
 	if strings.TrimSpace(b.Text) == "" || n > promptTextMax {
 		return fmt.Errorf("Prompt must be 1–%d characters", promptTextMax)
 	}
-	if !strings.HasPrefix(b.ModelID, "cursor/") || len(b.ModelID) > 128 {
-		return fmt.Errorf("Model %q is not a Cursor model", b.ModelID)
+	if checkModel != nil {
+		if msg := checkModel(b.ModelID); msg != "" {
+			return errors.New(msg)
+		}
 	}
 	if len(b.Images) > promptImagesMax {
 		return fmt.Errorf("At most %d images per prompt", promptImagesMax)
@@ -202,7 +221,7 @@ func (b promptBody) validate() error {
 	return nil
 }
 
-func (h *Host) publish(sid string, e agent.Event) { h.bus.Publish(sid, e) }
+func (h *Host) publish(sid string, e codingagent.Event) { h.bus.Publish(sid, e) }
 
 func (h *Host) prompt(w http.ResponseWriter, r *http.Request, prm Params) {
 	p, s, ok := h.session(w, prm)
@@ -214,39 +233,43 @@ func (h *Host) prompt(w http.ResponseWriter, r *http.Request, prm Params) {
 		WriteError(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
-	if err := body.validate(); err != nil {
+	ad := h.adapterOf(s)
+	var checkModel func(string) string
+	if ad != nil {
+		checkModel = ad.CheckModel
+	}
+	if err := body.validate(checkModel); err != nil {
 		WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if h.opts.Agent == nil {
+	if ad == nil {
 		WriteError(w, http.StatusServiceUnavailable, "The agent runtime is not part of this build")
 		return
 	}
-	// Fail closed: no SDK sandbox, no agent.
-	if err := h.opts.Agent.SandboxError(); err != nil {
+	// Fail closed: the runtime's sandbox is not usable, no agent.
+	if err := ad.Ready(); err != nil {
 		h.agentUnavailable(w, err)
 		return
 	}
-	if !h.opts.Agent.HasKey() {
-		WriteError(w, http.StatusServiceUnavailable, agent.ErrNoKey.Error())
+	if !ad.HasCredential() {
+		WriteError(w, http.StatusServiceUnavailable, noCredential(ad).Error())
 		return
 	}
 	cwd := h.sessionDir(p, s)
-	if err := sandbox.CheckWorkspace(cwd); err != nil {
+	if err := ad.CheckWorkspace(cwd); err != nil {
 		WriteError(w, http.StatusConflict, err.Error())
 		return
 	}
 	runID := store.NewID()
 	ctx, cancel := context.WithTimeout(context.Background(), agentRunTimeout)
 	defer cancel()
-	tr := &agent.Translator{SessionID: s.ID, RunID: runID, Cwd: cwd}
 	h.mu.Lock()
 	if _, busy := h.runs[s.ID]; busy {
 		h.mu.Unlock()
 		WriteError(w, http.StatusConflict, "This chat is still working; wait or stop it")
 		return
 	}
-	h.runs[s.ID] = &activeRun{runID: runID, cancel: cancel, tr: tr}
+	h.runs[s.ID] = &activeRun{runID: runID, cancel: cancel}
 	h.mu.Unlock()
 	defer func() {
 		h.mu.Lock()
@@ -267,65 +290,63 @@ func (h *Host) prompt(w http.ResponseWriter, r *http.Request, prm Params) {
 	if s.Title == "" {
 		s.Title = oneLineTitle(body.Text)
 	}
-	h.publish(s.ID, agent.Event{"type": "session.status", "sessionId": s.ID, "status": "running", "runId": runID})
+	ref := codingagent.Ref{SessionID: s.ID, RunID: runID}
+	h.publish(s.ID, codingagent.SessionStatus{Ref: ref, Status: "running"})
 
-	outcome := h.runPrompt(ctx, p, &s, body, tr)
-	h.publish(s.ID, agent.Event{"type": "session.status", "sessionId": s.ID, "status": outcome["status"], "runId": runID})
+	outcome := h.runPrompt(ctx, p, &s, body, ad, runID)
+	status, _ := outcome["status"].(string)
+	h.publish(s.ID, codingagent.SessionStatus{Ref: ref, Status: status})
 	WriteJSON(w, http.StatusOK, outcome)
 }
 
 // runPrompt does the run and answers the PromptOutcome; the transcript gets the assistant row either way.
-func (h *Host) runPrompt(ctx context.Context, p store.Project, s *store.Session, body promptBody, tr *agent.Translator) map[string]any {
+func (h *Host) runPrompt(ctx context.Context, p store.Project, s *store.Session, body promptBody, ad codingagent.Adapter, runID string) map[string]any {
 	fail := func(msg string) map[string]any {
-		_, _ = h.opts.Store.Append(store.Message{SessionID: s.ID, Role: "assistant", Content: "⚠ " + msg, RunID: tr.RunID})
+		_, _ = h.opts.Store.Append(store.Message{SessionID: s.ID, Role: "assistant", Content: "⚠ " + msg, RunID: runID})
 		h.touch(s)
-		return map[string]any{"status": "error", "text": "", "error": msg, "runId": tr.RunID}
+		return map[string]any{"status": "error", "text": "", "error": msg, "runId": runID}
 	}
 	if err := h.syncBeforeRun(ctx, p, *s); err != nil {
 		return fail(err.Error())
 	}
-	model, err := h.opts.Agent.Select(ctx, body.ModelID, body.ModelParams)
+	sess, err := ad.Open(ctx, codingagent.OpenRequest{Resume: s.AgentID, Cwd: h.sessionDir(p, *s), ModelID: body.ModelID, ModelParams: body.ModelParams})
 	if err != nil {
-		if errors.Is(err, agent.ErrUnknownModel) {
-			return fail(err.Error() + " — pick another model (the list is refreshed when the chat is reopened)")
+		var oe *codingagent.OpenError
+		if errors.As(err, &oe) && oe.Phase == codingagent.PhaseModel {
+			if errors.Is(err, codingagent.ErrUnknownModel) {
+				return fail(err.Error() + " — pick another model (the list is refreshed when the chat is reopened)")
+			}
+			return fail(h.agentError(ad, "Could not start the agent: ", err))
 		}
-		return fail(h.agentError("Could not start the agent: ", err))
+		return fail(h.agentError(ad, "Could not start the agent: ", err) + ad.DropModel(body.ModelID, err))
 	}
-	cwd := h.sessionDir(p, *s)
-	agentID, err := h.opts.Agent.EnsureAgent(ctx, s.AgentID, cwd, model)
-	if err != nil {
-		return fail(h.agentError("Could not start the agent: ", err) + h.modelDropped(body.ModelID, err))
-	}
-	if agentID != s.AgentID {
-		s.AgentID = agentID
+	if handle := sess.Handle(); handle != s.AgentID {
+		s.AgentID = handle
 		_ = h.opts.Store.PutSession(*s)
 	}
+	run := sess.Start(ctx, s.ID, runID, codingagent.Prompt{Text: body.Text, Images: body.Images}, func(e codingagent.Event) { h.publish(s.ID, e) })
 	h.mu.Lock()
-	if run := h.runs[s.ID]; run != nil {
-		run.agentID = agentID
+	if active := h.runs[s.ID]; active != nil {
+		active.run = run
 	}
 	h.mu.Unlock()
-	sendErr := h.opts.Agent.Send(ctx, agentID, body.Text, body.Images, model, tr, func(e agent.Event) { h.publish(s.ID, e) })
+	res, sendErr := run.Wait()
 	lctx, lcancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer lcancel()
 	changed, landErr := h.landRun(lctx, p, *s, body.Text)
 	if len(changed) > 0 {
-		paths := make([]any, len(changed))
-		for i, c := range changed {
-			paths[i] = c
-		}
-		h.publish(s.ID, agent.Event{"type": "files.changed", "sessionId": s.ID, "paths": paths, "runId": tr.RunID})
+		h.publish(s.ID, codingagent.FilesChanged{Ref: codingagent.Ref{SessionID: s.ID, RunID: runID}, Paths: changed})
 	}
-	text := tr.Text.String()
+	text := res.Text
 	if text == "" {
-		text = tr.ResultText
+		text = res.Summary
 	}
 	errMsg := ""
 	switch {
 	case sendErr != nil:
-		errMsg = h.agentError("Agent run failed: ", sendErr) + h.modelDropped(body.ModelID, sendErr)
-	case tr.Error != "":
-		errMsg = "Agent run " + strings.ToLower(tr.Error) + h.modelDropped(body.ModelID, errors.New(tr.Error))
+		errMsg = h.agentError(ad, "Agent run failed: ", sendErr) + ad.DropModel(body.ModelID, sendErr)
+	case res.Error != "":
+		errMsg = "Agent run " + strings.ToLower(res.Error) + ad.DropModel(body.ModelID, errors.New(res.Error))
 	case landErr != nil:
 		errMsg = landErr.Error()
 	}
@@ -334,18 +355,18 @@ func (h *Host) runPrompt(ctx context.Context, p store.Project, s *store.Session,
 		content = strings.TrimSpace(text + "\n\n⚠ " + errMsg)
 	}
 	if content != "" {
-		_, _ = h.opts.Store.Append(store.Message{SessionID: s.ID, Role: "assistant", Content: content, RunID: tr.RunID})
+		_, _ = h.opts.Store.Append(store.Message{SessionID: s.ID, Role: "assistant", Content: content, RunID: runID})
 	}
 	h.touch(s)
-	out := map[string]any{"status": "idle", "text": text, "runId": tr.RunID, "toolCalls": tr.ToolCalls, "filesChanged": len(changed)}
+	out := map[string]any{"status": "idle", "text": text, "runId": runID, "toolCalls": res.ToolCalls, "filesChanged": len(changed)}
 	if errMsg != "" {
 		out["status"], out["error"] = "error", errMsg
 	}
-	if u := tr.Usage; u != nil {
+	if u := res.Usage; u != nil {
 		out["usage"] = map[string]int64{"tokensIn": u.InputTokens, "tokensOut": u.OutputTokens, "cacheReadTokens": u.CacheReadTokens,
 			"cacheWriteTokens": u.CacheWriteTokens, "reasoningTokens": u.ReasoningTokens, "totalTokens": u.TotalTokens}
 	}
-	line := fmt.Sprintf("run %s session %s model %s: status %v tools %d files %d usage %+v", tr.RunID, s.ID, body.ModelID, out["status"], tr.ToolCalls, len(changed), tr.Usage)
+	line := fmt.Sprintf("run %s session %s runtime %s model %s: status %v tools %d files %d usage %+v", runID, s.ID, ad.Runtime(), body.ModelID, out["status"], res.ToolCalls, len(changed), res.Usage)
 	if errMsg != "" {
 		line += " error: " + oneLine(errMsg, 400)
 	}
@@ -397,8 +418,8 @@ func (h *Host) events(w http.ResponseWriter, r *http.Request, prm Params) {
 	w.WriteHeader(http.StatusOK)
 	ch, unsub := h.bus.Subscribe(s.ID)
 	defer unsub()
-	send := func(e agent.Event) bool {
-		raw, _ := json.Marshal(e)
+	send := func(e codingagent.Event) bool {
+		raw, _ := json.Marshal(e.Wire())
 		if _, err := fmt.Fprintf(w, "data: %s\n\n", raw); err != nil {
 			return false
 		}
@@ -407,7 +428,7 @@ func (h *Host) events(w http.ResponseWriter, r *http.Request, prm Params) {
 		}
 		return true
 	}
-	if !send(agent.Event{"type": "session.status", "sessionId": s.ID, "status": h.sessionStatus(s.ID)}) {
+	if !send(codingagent.SessionStatus{Ref: codingagent.Ref{SessionID: s.ID}, Status: h.sessionStatus(s.ID)}) {
 		return
 	}
 	tick := time.NewTicker(15 * time.Second)
@@ -446,7 +467,7 @@ func (h *Host) exportSession(w http.ResponseWriter, _ *http.Request, prm Params)
 		title = s.Title
 	}
 	bundle := map[string]any{"format": "buildy.chat.v1", "exportedAt": store.Now(), "projectId": p.ID,
-		"session": map[string]any{"id": s.ID, "title": title, "runtime": "cursor-sdk"}, "messages": rows}
+		"session": map[string]any{"id": s.ID, "title": title, "runtime": codingagent.RuntimeOf(s.Runtime)}, "messages": rows}
 	raw, _ := json.Marshal(bundle)
 	sum := sha256.Sum256(raw)
 	bundle["checksum"] = "sha256:" + hex.EncodeToString(sum[:])
@@ -487,12 +508,6 @@ func (h *Host) feedback(w http.ResponseWriter, r *http.Request, prm Params) {
 }
 
 // modelDropped marks a model that failed with an access or plan error unavailable for this key and says so.
-func (h *Host) modelDropped(modelID string, err error) string {
-	if h.opts.Agent != nil && h.opts.Agent.MarkUnavailable(modelID, err) {
-		return "\n\nThis model is not available for your Cursor key and was removed from the model list; pick another one."
-	}
-	return ""
-}
 
 // oneLine is s on one line, cut to max runes (for the log).
 func oneLine(s string, max int) string {

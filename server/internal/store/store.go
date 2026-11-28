@@ -27,10 +27,12 @@ type Project struct {
 
 // Session is one agent chat, with its own git worktree and branch.
 type Session struct {
-	ID            string `json:"id"`
-	ProjectID     string `json:"projectId"`
-	Title         string `json:"title,omitempty"`
-	AgentID       string `json:"agentId,omitempty"`
+	ID        string `json:"id"`
+	ProjectID string `json:"projectId"`
+	Title     string `json:"title,omitempty"`
+	AgentID   string `json:"agentId,omitempty"`
+	// Runtime is the coding-agent runtime of the chat (codingagent.Runtime*); empty = cursor-sdk (chats made before runtimes).
+	Runtime       string `json:"runtime,omitempty"`
 	Worktree      string `json:"worktree,omitempty"`
 	Branch        string `json:"branch,omitempty"`
 	LastMessageAt string `json:"lastMessageAt,omitempty"`

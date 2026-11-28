@@ -1,7 +1,6 @@
 package host
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/buildytech/vibechat-desktop/server/internal/agent"
+	"github.com/buildytech/vibechat-desktop/server/internal/codingagent"
 	"github.com/buildytech/vibechat-desktop/server/internal/store"
 	"github.com/buildytech/vibechat-desktop/server/internal/templates"
 )
@@ -22,44 +21,18 @@ type Capabilities struct {
 	Worktrees    bool   `json:"worktrees"`
 	PreviewLocal bool   `json:"preview_local"`
 	AgentSandbox bool   `json:"agent_sandbox"`
-	// AgentUnsandboxed: the agent runs without the Cursor SDK sandbox (Windows); the Studio shows a warning.
+	// AgentUnsandboxed: the agent runs without its runtime's sandbox (Cursor SDK on Windows); the Studio shows a warning.
 	AgentUnsandboxed bool `json:"agent_unsandboxed"`
 	Templates        bool `json:"templates"`
 }
 
-// Agent is what the host needs from the agent runtime (agent.Runner; a fake in tests).
-type Agent interface {
-	SandboxError() error
-	// Unsandboxed reports that agents run without the SDK sandbox (Windows: cursor-sdk-bridge has none on win32).
-	Unsandboxed() bool
-	HasKey() bool
-	Me(ctx context.Context) (agent.Account, error)
-	// CheckKey asks Cursor whether a key works before it is stored.
-	CheckKey(ctx context.Context, key string) (agent.Account, error)
-	// Models is the model menu of the current key (Cursor's list, nothing hard-coded); Select resolves a menu id;
-	// MarkUnavailable drops a model that failed with an access or plan error from this key's menu.
-	Models(ctx context.Context) ([]agent.Model, error)
-	Select(ctx context.Context, modelID string, params []agent.ModelParam) (agent.Selection, error)
-	MarkUnavailable(modelID string, err error) bool
-	EnsureAgent(ctx context.Context, agentID, cwd string, model agent.Selection) (string, error)
-	Send(ctx context.Context, agentID, text string, images []agent.Image, model agent.Selection, tr *agent.Translator, emit func(agent.Event)) error
-	Cancel(ctx context.Context, agentID, runID string) error
-}
-
-// KeyStore is the Cursor key store (secrets.File).
-type KeyStore interface {
-	Key() (string, string)
-	Store(string) error
-	Forget() error
-}
-
 // Options configure a Host.
 type Options struct {
-	Seam        Seam
-	Version     string
-	Store       *store.Store
-	Agent       Agent
-	Keys        KeyStore
+	Seam    Seam
+	Version string
+	Store   *store.Store
+	// Agents are the coding-agent runtimes of this server; the default one serves new chats (its contour config).
+	Agents      *codingagent.Registry
 	Templates   []templates.Profile
 	ProjectsDir string
 	// WorktreesDir holds per-session git worktrees (outside the project folder); "" turns worktrees off.
@@ -150,8 +123,10 @@ func (h *Host) Capabilities() Capabilities {
 	c.Templates = len(h.opts.Templates) > 0 && h.hasTool("git")
 	c.Worktrees = h.opts.WorktreesDir != "" && h.hasTool("git")
 	c.PreviewLocal = h.opts.Preview != nil && h.hasTool("bun")
-	c.AgentSandbox = h.opts.Agent != nil && h.opts.Agent.SandboxError() == nil
-	c.AgentUnsandboxed = c.AgentSandbox && h.opts.Agent.Unsandboxed()
+	if ad := h.adapter(h.opts.Agents.Default()); ad != nil {
+		c.AgentSandbox = ad.Ready() == nil
+		c.AgentUnsandboxed = c.AgentSandbox && ad.Unsandboxed()
+	}
 	return c
 }
 

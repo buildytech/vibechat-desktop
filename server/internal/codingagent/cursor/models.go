@@ -1,19 +1,17 @@
-// Package agent drives Cursor agents through the cursor-sdk-bridge for the host seam: one bridge process per app
+// Package cursor is the Cursor SDK runtime of the coding-agent seam (internal/codingagent): it drives Cursor agents through the cursor-sdk-bridge for the host seam: one bridge process per app
 // (started on first use with the key from the keychain), one Cursor agent per Studio session (created or resumed with
 // the SDK sandbox on), and the translation of the bridge's run stream into Agent Contract v1 events.
-package agent
+package cursor
 
 import (
-	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/buildytech/vibechat-desktop/server/internal/codingagent"
 )
 
 // ModelParam is a Cursor model parameter value.
-type ModelParam struct {
-	ID    string `json:"id"`
-	Value string `json:"value"`
-}
+type ModelParam = codingagent.ModelParam
 
 // Selection is the bridge's ModelSelection.
 type Selection struct {
@@ -22,11 +20,7 @@ type Selection struct {
 }
 
 // Model is AgentModel of the contract.
-type Model struct {
-	ID       string `json:"id"`
-	Provider string `json:"provider"`
-	Label    string `json:"label"`
-}
+type Model = codingagent.Model
 
 // CatalogModel is one item of the key's model list (SdkCursorService.ListModels, the SDK's /v1/models).
 type CatalogModel struct {
@@ -52,7 +46,12 @@ type Catalog []CatalogModel
 const AutoID = "cursor/auto"
 
 // ErrUnknownModel: the model is not in the key's list (or was marked unavailable for it).
-var ErrUnknownModel = errors.New("model not available for this Cursor key")
+var ErrUnknownModel error = unknownModel{}
+
+type unknownModel struct{}
+
+func (unknownModel) Error() string        { return "model not available for this Cursor key" }
+func (unknownModel) Is(target error) bool { return target == codingagent.ErrUnknownModel }
 
 func (m CatalogModel) hasParam(id, value string) bool {
 	for _, p := range m.Parameters {
@@ -147,7 +146,7 @@ func (c Catalog) Select(modelID string, params []ModelParam) (Selection, error) 
 				return
 			}
 		}
-		sel = append(sel, ModelParam{id, value})
+		sel = append(sel, ModelParam{ID: id, Value: value})
 	}
 	for _, p := range params {
 		if p.ID != "fast" && m.hasParam(p.ID, p.Value) {

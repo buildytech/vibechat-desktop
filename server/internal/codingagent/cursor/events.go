@@ -1,15 +1,17 @@
-package agent
+package cursor
 
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/buildytech/vibechat-desktop/server/internal/codingagent"
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
-// Event is one Agent Contract v1 AgentEvent (studio packages/agent-contract), as sent over SSE.
-type Event map[string]any
+// Event is a neutral coding-agent event; the Translator emits the closed set of internal/codingagent.
+type Event = codingagent.Event
 
 const (
 	summaryMax = 240
@@ -41,14 +43,7 @@ type frame struct {
 }
 
 // Usage is the token usage of a run.
-type Usage struct {
-	InputTokens      int64 `json:"inputTokens"`
-	OutputTokens     int64 `json:"outputTokens"`
-	CacheReadTokens  int64 `json:"cacheReadTokens"`
-	CacheWriteTokens int64 `json:"cacheWriteTokens"`
-	TotalTokens      int64 `json:"totalTokens"`
-	ReasoningTokens  int64 `json:"reasoningTokens"`
-}
+type Usage = codingagent.Usage
 
 // Translator turns bridge frames into contract events for one run and keeps the run's totals.
 type Translator struct {
@@ -66,17 +61,19 @@ type Translator struct {
 	ResultText string
 	Error      string
 	BridgeRun  string
+
+	mu sync.Mutex
 }
 
-func (t *Translator) ev(typ string, kv ...any) Event {
-	e := Event{"type": typ, "sessionId": t.SessionID}
-	if t.RunID != "" {
-		e["runId"] = t.RunID
-	}
-	for i := 0; i+1 < len(kv); i += 2 {
-		e[kv[i].(string)] = kv[i+1]
-	}
-	return e
+// Bridge is the bridge's id of the run ("" until its first status frame); safe to call while frames arrive.
+func (t *Translator) Bridge() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.BridgeRun
+}
+
+func (t *Translator) ref() codingagent.Ref {
+	return codingagent.Ref{SessionID: t.SessionID, RunID: t.RunID}
 }
 
 type toolCall struct {
@@ -94,6 +91,8 @@ type toolCall struct {
 
 // Frame translates one raw frame; it returns the events to publish (possibly none).
 func (t *Translator) Frame(raw json.RawMessage) []Event {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	var f frame
 	if json.Unmarshal(raw, &f) != nil {
 		return nil
@@ -116,8 +115,7 @@ func (t *Translator) Frame(raw json.RawMessage) []Event {
 		if json.Unmarshal(f.SDKMessage.Message, &m) == nil {
 			u := m.Usage
 			t.Usage = &u
-			return []Event{t.ev("usage", "tokensIn", u.InputTokens, "tokensOut", u.OutputTokens, "cacheReadTokens", u.CacheReadTokens,
-				"cacheWriteTokens", u.CacheWriteTokens, "reasoningTokens", u.ReasoningTokens, "totalTokens", u.TotalTokens)}
+			return []Event{codingagent.UsageEvent{Ref: t.ref(), Usage: u}}
 		}
 	case f.Result != nil:
 		t.Status = f.Result.Status
@@ -153,37 +151,35 @@ func (t *Translator) update(typ string, raw json.RawMessage) []Event {
 			return nil
 		}
 		t.Text.WriteString(u.Text)
-		return []Event{t.ev("message.delta", "role", "assistant", "text", u.Text)}
+		return []Event{codingagent.MessageDelta{Ref: t.ref(), Text: u.Text}}
 	case "thinking-delta":
 		if u.Text == "" {
 			return nil
 		}
-		return []Event{t.ev("thinking.delta", "text", u.Text)}
+		return []Event{codingagent.ThinkingDelta{Ref: t.ref(), Text: u.Text}}
 	case "thinking-completed":
-		e := t.ev("thinking.completed")
+		dur := int64(-1)
 		if u.ThinkingDurationMs != nil && *u.ThinkingDurationMs >= 0 {
-			e["durationMs"] = *u.ThinkingDurationMs
+			dur = *u.ThinkingDurationMs
 		}
-		return []Event{e}
+		return []Event{codingagent.ThinkingCompleted{Ref: t.ref(), DurationMs: dur}}
 	case "tool-call-started", "tool-call-completed", "tool-call-error":
 		if u.ToolCall == nil {
 			return nil
 		}
 		v := t.view(u.ToolCall, typ != "tool-call-started")
-		evType := "tool.finished"
-		if typ == "tool-call-started" {
-			evType = "tool.started"
+		started := typ == "tool-call-started"
+		if started {
 			t.ToolCalls++
 		}
-		e := t.ev(evType, "tool", v.tool, "summary", v.summary, "kind", v.kind)
-		if v.detail != "" {
-			e["detail"] = v.detail
-		}
-		if u.CallID != "" {
-			e["callId"] = u.CallID
+		var e Event
+		if started {
+			e = codingagent.ToolStarted{Ref: t.ref(), CallID: u.CallID, Tool: v.tool, Kind: v.kind, Summary: v.summary}
+		} else {
+			e = codingagent.ToolFinished{Ref: t.ref(), CallID: u.CallID, Tool: v.tool, Kind: v.kind, Summary: v.summary, Detail: v.detail}
 		}
 		out := []Event{e}
-		if evType == "tool.finished" && v.file != "" && v.wrote {
+		if !started && v.file != "" && v.wrote {
 			t.markFile(v.file)
 		}
 		return out
@@ -195,11 +191,7 @@ func (t *Translator) update(typ string, raw json.RawMessage) []Event {
 		if text == "" {
 			return nil
 		}
-		e := t.ev("tool.delta", "tool", "shell", "text", clip(text, detailMax))
-		if u.CallID != "" {
-			e["callId"] = u.CallID
-		}
-		return []Event{e}
+		return []Event{codingagent.ToolDelta{Ref: t.ref(), CallID: u.CallID, Tool: "shell", Text: clip(text, detailMax)}}
 	}
 	return nil
 }

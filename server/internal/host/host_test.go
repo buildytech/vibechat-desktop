@@ -274,7 +274,7 @@ func TestCredentialSaveChecksTheKey(t *testing.T) {
 	if code, out := put("grok_bad_supersecret_2a61"); code != 200 || !strings.Contains(out, "Invalid Service Token") ||
 		!strings.Contains(out, "grok.com/dashboard/api-keys") || !strings.Contains(out, `prefix \"grok_\"`) || strings.Contains(out, "supersecret") {
 		t.Fatalf("rejected key: %d %s", code, out)
-	} else if k, _ := e.host.opts.Keys.Key(); k != "grok_bad_supersecret_2a61" {
+	} else if k, _ := e.agent.keys.Key(); k != "grok_bad_supersecret_2a61" {
 		t.Fatal("a rejected key must still be kept")
 	}
 	if code, out := put("grok_offline_supersecret"); code != 200 || !strings.Contains(out, "could not check") {
@@ -282,7 +282,7 @@ func TestCredentialSaveChecksTheKey(t *testing.T) {
 	}
 	if code, out := put("  grok_good_supersecret_2a61\n"); code != 200 || !strings.Contains(out, "a@b.c") || strings.Contains(out, "warning") {
 		t.Fatalf("good key: %d %s", code, out)
-	} else if k, _ := e.host.opts.Keys.Key(); k != "grok_good_supersecret_2a61" {
+	} else if k, _ := e.agent.keys.Key(); k != "grok_good_supersecret_2a61" {
 		t.Fatalf("not trimmed: %q", k)
 	}
 }
@@ -290,8 +290,8 @@ func TestCredentialSaveChecksTheKey(t *testing.T) {
 // "Could not start the agent: bridge: unauthenticated: …" carries the key diagnostic and where to get a key.
 func TestAgentErrorExplainsARejectedKey(t *testing.T) {
 	e := newEnv(t, pinnedSeam(t), false)
-	_ = e.host.opts.Keys.Store("grok_supersecret_middle_2a61")
-	msg := e.host.agentError("Could not start the agent: ", &bridge.Error{Code: "unauthenticated", Message: "Invalid Service Token"})
+	_ = e.agent.keys.Store("grok_supersecret_middle_2a61")
+	msg := e.host.agentError(e.agent, "Could not start the agent: ", &bridge.Error{Code: "unauthenticated", Message: "Invalid Service Token"})
 	for _, want := range []string{"Invalid Service Token", "28 chars", `prefix "grok_"`, "fingerprint sha256:", "from keychain", "grok.com/dashboard/api-keys"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("%q lacks %q", msg, want)
@@ -300,7 +300,7 @@ func TestAgentErrorExplainsARejectedKey(t *testing.T) {
 	if strings.Contains(msg, "supersecret") || strings.Contains(msg, "2a61") {
 		t.Fatal("key leaked")
 	}
-	if got := e.host.agentError("x: ", errors.New("boom")); got != "x: boom" {
+	if got := e.host.agentError(e.agent, "x: ", errors.New("boom")); got != "x: boom" {
 		t.Errorf("other errors unchanged: %q", got)
 	}
 }

@@ -1,4 +1,4 @@
-package agent
+package cursor
 
 import (
 	"encoding/json"
@@ -56,11 +56,11 @@ func TestSelectUsesDefaultVariantAndFast(t *testing.T) {
 			t.Errorf("Select(%s) = %+v, %v; want %+v", id, got, err, want)
 		}
 	}
-	check("cursor/composer-2.5-fast", nil, Selection{ID: "composer-2.5", Params: []ModelParam{{"fast", "true"}}})
-	check("cursor/composer-2.5", nil, Selection{ID: "composer-2.5", Params: []ModelParam{{"fast", "false"}}})
+	check("cursor/composer-2.5-fast", nil, Selection{ID: "composer-2.5", Params: []ModelParam{{ID: "fast", Value: "true"}}})
+	check("cursor/composer-2.5", nil, Selection{ID: "composer-2.5", Params: []ModelParam{{ID: "fast", Value: "false"}}})
 	check("cursor/auto", nil, Selection{ID: "default"})
-	check("cursor/claude-opus-5", []ModelParam{{"effort", "low"}, {"effort", "bogus"}, {"fast", "true"}, {"x", "y"}},
-		Selection{ID: "claude-opus-5", Params: []ModelParam{{"cyber", "false"}, {"thinking", "true"}, {"effort", "low"}, {"fast", "false"}}})
+	check("cursor/claude-opus-5", []ModelParam{{ID: "effort", Value: "low"}, {ID: "effort", Value: "bogus"}, {ID: "fast", Value: "true"}, {ID: "x", Value: "y"}},
+		Selection{ID: "claude-opus-5", Params: []ModelParam{{ID: "cyber", Value: "false"}, {ID: "thinking", Value: "true"}, {ID: "effort", Value: "low"}, {ID: "fast", Value: "false"}}})
 	check("cursor/gemini-3-flash", nil, Selection{ID: "gemini-3-flash"})
 	if _, err := c.Select("cursor/gpt-9", nil); !errors.Is(err, ErrUnknownModel) {
 		t.Errorf("unknown model: %v", err)

@@ -1,4 +1,4 @@
-package agent
+package cursor
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/buildytech/vibechat-desktop/server/internal/bridge"
+	"github.com/buildytech/vibechat-desktop/server/internal/codingagent"
 	"github.com/buildytech/vibechat-desktop/server/internal/procgroup"
 	"github.com/buildytech/vibechat-desktop/server/internal/sandbox"
 )
@@ -67,7 +68,12 @@ func NewRunner(o RunnerOptions) *Runner {
 var ErrSandboxUnsupported = errors.New("this system does not support the agent sandbox")
 
 // ErrNoKey means no Cursor key is configured.
-var ErrNoKey = errors.New("No Cursor API key configured — add one in Settings")
+var ErrNoKey error = noKey{}
+
+type noKey struct{}
+
+func (noKey) Error() string        { return "No Cursor API key configured — add one in Settings" }
+func (noKey) Is(target error) bool { return target == codingagent.ErrNoCredential }
 
 func (r *Runner) checkSandbox() error {
 	if r.o.Located != nil {
@@ -405,10 +411,7 @@ func (r *Runner) EnsureAgent(ctx context.Context, agentID, cwd string, model Sel
 }
 
 // Image is a prompt attachment (base64 data).
-type Image struct {
-	MediaType string `json:"mediaType"`
-	Data      string `json:"data"`
-}
+type Image = codingagent.Image
 
 // Send runs one prompt and feeds every frame to tr, publishing the translated events through emit.
 func (r *Runner) Send(ctx context.Context, agentID, text string, images []Image, model Selection, tr *Translator, emit func(Event)) error {

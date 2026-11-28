@@ -1,0 +1,26 @@
+{"sdkMessage": {"type": "status", "message": {"type": "status", "run_id": "run-syn", "status": "RUNNING"}}}
+{"interactionUpdate": {"type": "text-delta", "update": {"text": "Hello ", "type": "text-delta"}}}
+{"interactionUpdate": {"type": "text-delta", "update": {"text": "", "type": "text-delta"}}}
+{"interactionUpdate": {"type": "thinking-delta", "update": {"text": "hmm", "type": "thinking-delta"}}}
+{"interactionUpdate": {"type": "thinking-completed", "update": {"type": "thinking-completed"}}}
+{"interactionUpdate": {"type": "tool-call-started", "update": {"callId": "c1", "toolCall": {"type": "shell", "args": {"command": "npm   run\nbuild"}}, "type": "tool-call-started"}}}
+{"interactionUpdate": {"type": "shell-output-delta", "update": {"callId": "c1", "event": {"stdout": "out\n", "stderr": "err\n"}, "type": "shell-output-delta"}}}
+{"interactionUpdate": {"type": "shell-output-delta", "update": {"callId": "c1", "text": "plain", "type": "shell-output-delta"}}}
+{"interactionUpdate": {"type": "shell-output-delta", "update": {"callId": "c1", "text": "", "type": "shell-output-delta"}}}
+{"interactionUpdate": {"type": "tool-call-completed", "update": {"callId": "c1", "toolCall": {"type": "shell", "args": {"command": "npm run build"}, "result": {"status": "success", "value": {"stdout": "done\n", "stderr": "", "exitCode": 2}}}, "type": "tool-call-completed"}}}
+{"interactionUpdate": {"type": "tool-call-started", "update": {"callId": "c2", "toolCall": {"type": "write", "args": {"file_path": "/W/ws/src/a.ts"}}, "type": "tool-call-started"}}}
+{"interactionUpdate": {"type": "tool-call-error", "update": {"callId": "c2", "toolCall": {"type": "write", "args": {"file_path": "/W/ws/src/a.ts"}, "result": {"status": "error", "error": {"message": "denied"}}}, "type": "tool-call-error"}}}
+{"interactionUpdate": {"type": "tool-call-started", "update": {"callId": "c3", "toolCall": {"type": "delete", "args": {"target_file": "/W/ws/old.txt"}}, "type": "tool-call-started"}}}
+{"interactionUpdate": {"type": "tool-call-completed", "update": {"callId": "c3", "toolCall": {"type": "delete", "args": {"target_file": "/W/ws/old.txt"}, "result": {"status": "success", "value": {}}}, "type": "tool-call-completed"}}}
+{"interactionUpdate": {"type": "tool-call-started", "update": {"callId": "c4", "toolCall": {"type": "read", "args": {"path": "/outside/x"}}, "type": "tool-call-started"}}}
+{"interactionUpdate": {"type": "tool-call-completed", "update": {"callId": "c4", "toolCall": {"type": "read", "args": {"path": "/outside/x"}, "result": {"status": "success", "value": {"diffString": "d"}}}, "type": "tool-call-completed"}}}
+{"interactionUpdate": {"type": "tool-call-started", "update": {"callId": "c5", "toolCall": {"type": "grep", "args": {"pattern": "TODO"}}, "type": "tool-call-started"}}}
+{"interactionUpdate": {"type": "tool-call-completed", "update": {"callId": "c5", "toolCall": {"type": "grep", "args": {"pattern": "TODO"}, "result": {"status": "success", "value": {}}}, "type": "tool-call-completed"}}}
+{"interactionUpdate": {"type": "tool-call-started", "update": {"callId": "c6", "toolCall": {"type": "task", "args": {"description": "explore"}}, "type": "tool-call-started"}}}
+{"interactionUpdate": {"type": "tool-call-started", "update": {"callId": "c7", "toolCall": {"type": "updateTodos", "args": {}}, "type": "tool-call-started"}}}
+{"interactionUpdate": {"type": "tool-call-started", "update": {"callId": "c8", "toolCall": {"name": "mcp_thing", "args": {}}, "type": "tool-call-started"}}}
+{"interactionUpdate": {"type": "partial-tool-call", "update": {"callId": "c9", "toolCall": {"type": "edit", "args": {}}, "type": "partial-tool-call"}}}
+{"sdkMessage": {"type": "usage", "message": {"type": "usage", "usage": {"inputTokens": 10, "outputTokens": 5, "cacheReadTokens": 3, "cacheWriteTokens": 1, "totalTokens": 19, "reasoningTokens": 2}}}}
+{"result": {"runId": "run-syn", "status": "RUN_LIFECYCLE_STATUS_ERROR", "errorCode": "E_X", "result": {"result": "partial", "errorMessage": "model exploded"}}}
+{"done": {"runId": "run-syn"}}
+{"not": "a frame"}

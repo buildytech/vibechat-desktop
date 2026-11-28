@@ -1,11 +1,11 @@
 //go:build live
 
-package agent
+package cursor
 
 // Live: the menu from the key's model list and a short run on menu entries, exactly the app's path (Runner.Models →
 // Select → EnsureAgent → Send). Costs a few tiny model calls.
 // CURSOR_API_KEY=… VIBECHAT_BRIDGE_DIR=… VIBECHAT_HOOK_EXE=… [VIBECHAT_LIVE_MENU="cursor/composer-2.5-fast,…"]
-//   go test -tags live -run TestLiveMenuRuns ./internal/agent
+//   go test -tags live -run TestLiveMenuRuns ./internal/codingagent/cursor
 
 import (
 	"context"

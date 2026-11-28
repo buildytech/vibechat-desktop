@@ -8,8 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/buildytech/vibechat-desktop/server/internal/agent"
-	"github.com/buildytech/vibechat-desktop/server/internal/secrets"
+	"github.com/buildytech/vibechat-desktop/server/internal/codingagent"
 	"github.com/buildytech/vibechat-desktop/server/internal/store"
 )
 
@@ -21,34 +20,43 @@ func (h *Host) registerAccount() {
 }
 
 func (h *Host) agentUnavailable(w http.ResponseWriter, err error) {
-	if errors.Is(err, agent.ErrNoKey) {
-		WriteError(w, http.StatusServiceUnavailable, agent.ErrNoKey.Error())
+	if errors.Is(err, codingagent.ErrNoCredential) {
+		WriteError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	WriteError(w, http.StatusServiceUnavailable, "The agent is off on this machine: "+err.Error())
 }
 
+// noCredential is the error of an agent that needs a credential and has none.
+func noCredential(ad codingagent.Adapter) error {
+	if c := ad.Credential(); c != nil && c.NoCredential != nil {
+		return c.NoCredential
+	}
+	return codingagent.ErrNoCredential
+}
+
 func (h *Host) meCursor(w http.ResponseWriter, r *http.Request, _ Params) {
-	if h.opts.Agent == nil {
+	ad := h.adapter(codingagent.RuntimeCursorSDK)
+	if ad == nil {
 		WriteError(w, http.StatusServiceUnavailable, "The agent runtime is not part of this build")
 		return
 	}
-	if !h.opts.Agent.HasKey() {
-		WriteError(w, http.StatusServiceUnavailable, agent.ErrNoKey.Error())
+	if !ad.HasCredential() {
+		WriteError(w, http.StatusServiceUnavailable, noCredential(ad).Error())
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	acc, err := h.opts.Agent.Me(ctx)
+	acc, err := ad.Account(ctx)
 	if err != nil {
-		if agent.IsUnauthenticated(err) {
-			WriteError(w, http.StatusUnauthorized, h.agentError("", err))
+		if ad.Unauthenticated(err) {
+			WriteError(w, http.StatusUnauthorized, h.agentError(ad, "", err))
 			return
 		}
 		h.agentUnavailable(w, err)
 		return
 	}
-	display := strings.TrimSpace(acc.UserFirstName + " " + acc.UserLastName)
+	display := strings.TrimSpace(acc.FirstName + " " + acc.LastName)
 	nul := func(s string) any {
 		if s == "" {
 			return nil
@@ -56,93 +64,116 @@ func (h *Host) meCursor(w http.ResponseWriter, r *http.Request, _ Params) {
 		return s
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"account": map[string]any{
-		"firstName": nul(acc.UserFirstName), "lastName": nul(acc.UserLastName), "displayName": nul(display),
-		"email": nul(acc.UserEmail), "apiKeyName": nul(acc.APIKeyName),
+		"firstName": nul(acc.FirstName), "lastName": nul(acc.LastName), "displayName": nul(display),
+		"email": nul(acc.Email), "apiKeyName": nul(acc.KeyName),
 	}})
 }
 
-func credentialJSON(key, source string) map[string]any {
+func credentialJSON(runtime string, c *codingagent.CredentialSpec, key, source string) map[string]any {
 	now := store.Now()
-	return map[string]any{"runtime": "cursor-sdk", "providerId": "cursor", "hint": source, "masked": secrets.Mask(key), "createdAt": now, "updatedAt": now}
+	return map[string]any{"runtime": runtime, "providerId": c.Provider, "hint": source, "masked": c.Mask(key), "createdAt": now, "updatedAt": now}
+}
+
+// slots are the credential slots of the registered runtimes, sorted by runtime.
+func (h *Host) slots() (runtimes []string, specs map[string]*codingagent.CredentialSpec) {
+	specs = map[string]*codingagent.CredentialSpec{}
+	for _, rt := range h.opts.Agents.Runtimes() {
+		if c := h.adapter(rt).Credential(); c != nil {
+			runtimes = append(runtimes, rt)
+			specs[rt] = c
+		}
+	}
+	return runtimes, specs
 }
 
 func (h *Host) listCredentials(w http.ResponseWriter, _ *http.Request, _ Params) {
 	out := []map[string]any{}
-	if h.opts.Keys != nil {
-		if key, source := h.opts.Keys.Key(); key != "" {
-			out = append(out, credentialJSON(key, source))
+	runtimes, specs := h.slots()
+	for _, rt := range runtimes {
+		if key, source := specs[rt].Store.Key(); key != "" {
+			out = append(out, credentialJSON(rt, specs[rt], key, source))
 		}
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"credentials": out})
 }
 
-func cursorSlot(p Params) bool { return p["runtime"] == "cursor-sdk" && p["providerId"] == "cursor" }
+// slot is the adapter and credential slot a /me/credentials/:runtime/:providerId path names.
+func (h *Host) slot(w http.ResponseWriter, p Params) (codingagent.Adapter, *codingagent.CredentialSpec, bool) {
+	if ad := h.adapter(p["runtime"]); ad != nil {
+		if c := ad.Credential(); c != nil && c.Provider == p["providerId"] {
+			return ad, c, true
+		}
+	}
+	runtimes, specs := h.slots()
+	labels := make([]string, 0, len(runtimes))
+	for _, rt := range runtimes {
+		labels = append(labels, specs[rt].Label)
+	}
+	WriteError(w, http.StatusNotFound, "Only the "+strings.Join(labels, ", ")+" key is kept by this app")
+	return nil, nil, false
+}
 
 func (h *Host) putCredential(w http.ResponseWriter, r *http.Request, p Params) {
-	if !cursorSlot(p) || h.opts.Keys == nil {
-		WriteError(w, http.StatusNotFound, "Only the Cursor key is kept by this app")
+	ad, spec, ok := h.slot(w, p)
+	if !ok {
 		return
 	}
 	var body struct {
 		Key string `json:"key"`
 	}
 	if err := readJSON(r, 8<<10, &body); err != nil || strings.TrimSpace(body.Key) == "" {
-		WriteError(w, http.StatusBadRequest, "Paste a Cursor API key: "+secrets.WhereToGet)
+		WriteError(w, http.StatusBadRequest, spec.Missing)
 		return
 	}
 	key := strings.TrimSpace(body.Key)
-	if err := secrets.CheckFormat(key); err != nil {
-		WriteError(w, http.StatusBadRequest, "Not saved: "+err.Error()+".")
+	if msg := spec.Validate(key); msg != "" {
+		WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
-	if f := secrets.Foreign(key); f != "" {
-		WriteError(w, http.StatusBadRequest, "Not saved: this is a "+f+" key, not a key of type Cursor; "+secrets.WhereToGet+".")
-		return
-	}
-	if err := h.opts.Keys.Store(key); err != nil {
+	if err := spec.Store.Store(key); err != nil {
 		WriteError(w, http.StatusInternalServerError, "Could not save the key on the server: "+err.Error())
 		return
 	}
-	stored, source := h.opts.Keys.Key()
-	out := map[string]any{"credential": credentialJSON(stored, source)}
-	// Online check through the bridge (Me). The key is kept either way: offline the check cannot decide, and a
+	stored, source := spec.Store.Key()
+	out := map[string]any{"credential": credentialJSON(ad.Runtime(), spec, stored, source)}
+	// Online check through the runtime. The key is kept either way: offline the check cannot decide, and a
 	// rejected key is reported with what to do instead of being thrown away.
-	if h.opts.Agent != nil && h.opts.Agent.SandboxError() == nil {
+	if ad.Ready() == nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
-		acc, err := h.opts.Agent.CheckKey(ctx, key)
+		acc, err := ad.CheckCredential(ctx, key)
 		cancel()
 		switch {
 		case err == nil:
-			out["account"] = map[string]any{"email": acc.UserEmail, "apiKeyName": acc.APIKeyName}
-			h.logf("key saved and accepted by Cursor (%s)", secrets.Describe(key, source))
-		case agent.IsUnauthenticated(err):
-			out["warning"] = secrets.AuthHint(key, source) + " Cursor said: " + err.Error()
-			h.logf("key saved but rejected by Cursor: %v (%s)", err, secrets.Describe(key, source))
+			out["account"] = map[string]any{"email": acc.Email, "apiKeyName": acc.KeyName}
+			h.logf("key saved and accepted by %s (%s)", spec.Label, spec.Describe(key, source))
+		case ad.Unauthenticated(err):
+			out["warning"] = spec.AuthHint(key, source) + " " + spec.Label + " said: " + err.Error()
+			h.logf("key saved but rejected by %s: %v (%s)", spec.Label, err, spec.Describe(key, source))
 		default:
-			out["warning"] = "Saved, but Cursor could not check the key now: " + err.Error()
-			h.logf("key saved, not checked: %v (%s)", err, secrets.Describe(key, source))
+			out["warning"] = "Saved, but " + spec.Label + " could not check the key now: " + err.Error()
+			h.logf("key saved, not checked: %v (%s)", err, spec.Describe(key, source))
 		}
 	}
 	WriteJSON(w, http.StatusOK, out)
 }
 
-// agentError is the user-facing text of an agent failure; a key Cursor rejected gets what to do about it.
-func (h *Host) agentError(prefix string, err error) string {
+// agentError is the user-facing text of an agent failure; a key the runtime rejected gets what to do about it.
+func (h *Host) agentError(ad codingagent.Adapter, prefix string, err error) string {
 	msg := prefix + err.Error()
-	if agent.IsUnauthenticated(err) && h.opts.Keys != nil {
-		key, source := h.opts.Keys.Key()
-		h.logf("cursor rejected the key: %v (%s)", err, secrets.Describe(key, source))
-		msg += "\n\n" + secrets.AuthHint(key, source)
+	if spec := ad.Credential(); spec != nil && ad.Unauthenticated(err) {
+		key, source := spec.Store.Key()
+		h.logf("%s rejected the key: %v (%s)", ad.Runtime(), err, spec.Describe(key, source))
+		msg += "\n\n" + spec.AuthHint(key, source)
 	}
 	return msg
 }
 
 func (h *Host) deleteCredential(w http.ResponseWriter, _ *http.Request, p Params) {
-	if !cursorSlot(p) || h.opts.Keys == nil {
-		WriteError(w, http.StatusNotFound, "Only the Cursor key is kept by this app")
+	_, spec, ok := h.slot(w, p)
+	if !ok {
 		return
 	}
-	if err := h.opts.Keys.Forget(); err != nil {
+	if err := spec.Store.Forget(); err != nil {
 		WriteError(w, http.StatusInternalServerError, "Could not remove the key: "+err.Error())
 		return
 	}

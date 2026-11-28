@@ -1,0 +1,602 @@
+[
+  {
+    "body": {
+      "agent_sandbox": true,
+      "agent_unsandboxed": false,
+      "local_folder": true,
+      "preview_local": false,
+      "seam": "1",
+      "templates": true,
+      "version": "test",
+      "worktrees": true
+    },
+    "status": 200,
+    "step": "host capabilities"
+  },
+  {
+    "body": {
+      "credentials": []
+    },
+    "status": 200,
+    "step": "credentials, none yet"
+  },
+  {
+    "body": {
+      "error": "No Cursor API key configured — add one in Settings"
+    },
+    "status": 503,
+    "step": "me/cursor without a key"
+  },
+  {
+    "body": {
+      "credentials": [
+        {
+          "createdAt": "\u003ctime\u003e",
+          "hint": "keychain",
+          "masked": "••••6789",
+          "providerId": "cursor",
+          "runtime": "cursor-sdk",
+          "updatedAt": "\u003ctime\u003e"
+        }
+      ]
+    },
+    "status": 200,
+    "step": "credentials, one key"
+  },
+  {
+    "body": {
+      "account": {
+        "apiKeyName": "test",
+        "displayName": null,
+        "email": "a@b.c",
+        "firstName": null,
+        "lastName": null
+      }
+    },
+    "status": 200,
+    "step": "me/cursor"
+  },
+  {
+    "body": {
+      "error": "Only the Cursor key is kept by this app"
+    },
+    "status": 404,
+    "step": "put credential, wrong slot"
+  },
+  {
+    "body": {
+      "error": "Paste a Cursor API key: create or copy an API key of type \"Cursor\" (grok_…) at https://grok.com/dashboard/api-keys; \"Grok API\" keys (xai-…) do not work for the agent"
+    },
+    "status": 400,
+    "step": "put credential, empty"
+  },
+  {
+    "body": {
+      "error": "Not saved: this is a Grok API (xai-…) key, not a key of type Cursor; create or copy an API key of type \"Cursor\" (grok_…) at https://grok.com/dashboard/api-keys; \"Grok API\" keys (xai-…) do not work for the agent."
+    },
+    "status": 400,
+    "step": "put credential, foreign key"
+  },
+  {
+    "body": {
+      "credential": {
+        "createdAt": "\u003ctime\u003e",
+        "hint": "keychain",
+        "masked": "••••2a61",
+        "providerId": "cursor",
+        "runtime": "cursor-sdk",
+        "updatedAt": "\u003ctime\u003e"
+      },
+      "warning": "Cursor rejected the API key (key: 20 chars, prefix \"grok_\", fingerprint sha256:01f12c03, no whitespace, from keychain). Check it in Settings: create or copy an API key of type \"Cursor\" (grok_…) at https://grok.com/dashboard/api-keys; \"Grok API\" keys (xai-…) do not work for the agent. Cursor said: bridge: unauthenticated: Invalid Service Token"
+    },
+    "status": 200,
+    "step": "put credential, rejected"
+  },
+  {
+    "body": {
+      "account": {
+        "apiKeyName": "test",
+        "email": "a@b.c"
+      },
+      "credential": {
+        "createdAt": "\u003ctime\u003e",
+        "hint": "keychain",
+        "masked": "••••2a61",
+        "providerId": "cursor",
+        "runtime": "cursor-sdk",
+        "updatedAt": "\u003ctime\u003e"
+      }
+    },
+    "status": 200,
+    "step": "put credential, good"
+  },
+  {
+    "body": {
+      "project": {
+        "created_at": "\u003ctime\u003e",
+        "id": "\u003cid1\u003e",
+        "name": "golden",
+        "preview_url": null,
+        "status": "starting",
+        "template_id": "mini",
+        "updated_at": "\u003ctime\u003e"
+      }
+    },
+    "status": 201,
+    "step": "create project"
+  },
+  {
+    "body": {
+      "cost_usage": false,
+      "evidence_pack": false,
+      "models": [
+        {
+          "id": "cursor/auto",
+          "label": "Auto",
+          "provider": "cursor"
+        },
+        {
+          "id": "cursor/composer-2.5-fast",
+          "label": "Composer 2.5 Fast",
+          "provider": "cursor"
+        }
+      ],
+      "pty": false,
+      "runtime": "cursor-sdk",
+      "runtimeLabel": "Cursor",
+      "snapshots": false,
+      "streaming": true,
+      "subagents": false,
+      "tools": true,
+      "ui": {
+        "showThinking": true,
+        "showToolTrace": true
+      }
+    },
+    "status": 200,
+    "step": "agent capabilities"
+  },
+  {
+    "body": {
+      "session": {
+        "createdAt": "\u003ctime\u003e",
+        "id": "\u003cid2\u003e",
+        "lastMessageAt": null,
+        "projectId": "\u003cid1\u003e",
+        "runtime": "cursor-sdk",
+        "status": "idle",
+        "title": null,
+        "updatedAt": "\u003ctime\u003e",
+        "userId": "local"
+      }
+    },
+    "status": 201,
+    "step": "create session"
+  },
+  {
+    "body": {
+      "sessions": [
+        {
+          "createdAt": "\u003ctime\u003e",
+          "id": "\u003cid2\u003e",
+          "lastMessageAt": null,
+          "projectId": "\u003cid1\u003e",
+          "runtime": "cursor-sdk",
+          "status": "idle",
+          "title": null,
+          "updatedAt": "\u003ctime\u003e",
+          "userId": "local"
+        }
+      ]
+    },
+    "status": 200,
+    "step": "list sessions"
+  },
+  {
+    "body": {
+      "filesChanged": 1,
+      "runId": "\u003cid3\u003e",
+      "status": "idle",
+      "text": "wrote alpha",
+      "toolCalls": 0
+    },
+    "status": 200,
+    "step": "prompt, ok"
+  },
+  {
+    "body": {
+      "error": "This message was already sent"
+    },
+    "status": 409,
+    "step": "prompt, same client id again"
+  },
+  {
+    "body": {
+      "error": "Prompt must be 1–32000 characters"
+    },
+    "status": 400,
+    "step": "prompt, empty text"
+  },
+  {
+    "body": {
+      "error": "Model \"openai/gpt\" is not a Cursor model"
+    },
+    "status": 400,
+    "step": "prompt, foreign model"
+  },
+  {
+    "body": {
+      "error": "model not available for this Cursor key — pick another model (the list is refreshed when the chat is reopened)",
+      "runId": "\u003cid4\u003e",
+      "status": "error",
+      "text": ""
+    },
+    "status": 200,
+    "step": "prompt, model unknown to the key"
+  },
+  {
+    "body": {
+      "error": "Unsupported or too large image"
+    },
+    "status": 400,
+    "step": "prompt, bad image"
+  },
+  {
+    "body": {
+      "error": "clientMsgId too long"
+    },
+    "status": 400,
+    "step": "prompt, clientMsgId too long"
+  },
+  {
+    "body": {
+      "error": "Agent run failed: boom",
+      "filesChanged": 0,
+      "runId": "\u003cid5\u003e",
+      "status": "error",
+      "text": "",
+      "toolCalls": 0
+    },
+    "status": 200,
+    "step": "prompt, agent fails"
+  },
+  {
+    "body": [
+      {
+        "runId": "\u003cid3\u003e",
+        "sessionId": "\u003cid2\u003e",
+        "status": "running",
+        "type": "session.status"
+      },
+      {
+        "role": "assistant",
+        "runId": "\u003cid3\u003e",
+        "sessionId": "\u003cid2\u003e",
+        "text": "wrote alpha",
+        "type": "message.delta"
+      },
+      {
+        "paths": [
+          "alpha.txt"
+        ],
+        "runId": "\u003cid3\u003e",
+        "sessionId": "\u003cid2\u003e",
+        "type": "files.changed"
+      },
+      {
+        "runId": "\u003cid3\u003e",
+        "sessionId": "\u003cid2\u003e",
+        "status": "idle",
+        "type": "session.status"
+      },
+      {
+        "runId": "\u003cid4\u003e",
+        "sessionId": "\u003cid2\u003e",
+        "status": "running",
+        "type": "session.status"
+      },
+      {
+        "runId": "\u003cid4\u003e",
+        "sessionId": "\u003cid2\u003e",
+        "status": "error",
+        "type": "session.status"
+      },
+      {
+        "runId": "\u003cid5\u003e",
+        "sessionId": "\u003cid2\u003e",
+        "status": "running",
+        "type": "session.status"
+      },
+      {
+        "runId": "\u003cid5\u003e",
+        "sessionId": "\u003cid2\u003e",
+        "status": "error",
+        "type": "session.status"
+      }
+    ],
+    "step": "events published on the session stream"
+  },
+  {
+    "body": {
+      "messages": [
+        {
+          "content": "alpha",
+          "createdAt": "\u003ctime\u003e",
+          "id": "\u003cid6\u003e",
+          "role": "user",
+          "runId": "\u003cid3\u003e",
+          "seq": 1,
+          "sessionId": "\u003cid2\u003e"
+        },
+        {
+          "content": "wrote alpha",
+          "createdAt": "\u003ctime\u003e",
+          "id": "\u003cid7\u003e",
+          "role": "assistant",
+          "runId": "\u003cid3\u003e",
+          "seq": 2,
+          "sessionId": "\u003cid2\u003e"
+        },
+        {
+          "content": "x",
+          "createdAt": "\u003ctime\u003e",
+          "id": "\u003cid8\u003e",
+          "role": "user",
+          "runId": "\u003cid4\u003e",
+          "seq": 3,
+          "sessionId": "\u003cid2\u003e"
+        },
+        {
+          "content": "⚠ model not available for this Cursor key — pick another model (the list is refreshed when the chat is reopened)",
+          "createdAt": "\u003ctime\u003e",
+          "id": "\u003cid9\u003e",
+          "role": "assistant",
+          "runId": "\u003cid4\u003e",
+          "seq": 4,
+          "sessionId": "\u003cid2\u003e"
+        },
+        {
+          "content": "fail",
+          "createdAt": "\u003ctime\u003e",
+          "id": "\u003cid10\u003e",
+          "role": "user",
+          "runId": "\u003cid5\u003e",
+          "seq": 5,
+          "sessionId": "\u003cid2\u003e"
+        },
+        {
+          "content": "⚠ Agent run failed: boom",
+          "createdAt": "\u003ctime\u003e",
+          "id": "\u003cid11\u003e",
+          "role": "assistant",
+          "runId": "\u003cid5\u003e",
+          "seq": 6,
+          "sessionId": "\u003cid2\u003e"
+        }
+      ]
+    },
+    "status": 200,
+    "step": "transcript"
+  },
+  {
+    "body": {
+      "ok": true
+    },
+    "status": 200,
+    "step": "feedback"
+  },
+  {
+    "body": {
+      "error": "rating must be up or down"
+    },
+    "status": 400,
+    "step": "feedback, bad rating"
+  },
+  {
+    "body": {
+      "messages": [
+        {
+          "content": "alpha",
+          "createdAt": "\u003ctime\u003e",
+          "id": "\u003cid6\u003e",
+          "role": "user",
+          "runId": "\u003cid3\u003e",
+          "seq": 1,
+          "sessionId": "\u003cid2\u003e"
+        },
+        {
+          "content": "wrote alpha",
+          "createdAt": "\u003ctime\u003e",
+          "feedback": "up",
+          "id": "\u003cid7\u003e",
+          "role": "assistant",
+          "runId": "\u003cid3\u003e",
+          "seq": 2,
+          "sessionId": "\u003cid2\u003e"
+        },
+        {
+          "content": "x",
+          "createdAt": "\u003ctime\u003e",
+          "id": "\u003cid8\u003e",
+          "role": "user",
+          "runId": "\u003cid4\u003e",
+          "seq": 3,
+          "sessionId": "\u003cid2\u003e"
+        },
+        {
+          "content": "⚠ model not available for this Cursor key — pick another model (the list is refreshed when the chat is reopened)",
+          "createdAt": "\u003ctime\u003e",
+          "id": "\u003cid9\u003e",
+          "role": "assistant",
+          "runId": "\u003cid4\u003e",
+          "seq": 4,
+          "sessionId": "\u003cid2\u003e"
+        },
+        {
+          "content": "fail",
+          "createdAt": "\u003ctime\u003e",
+          "id": "\u003cid10\u003e",
+          "role": "user",
+          "runId": "\u003cid5\u003e",
+          "seq": 5,
+          "sessionId": "\u003cid2\u003e"
+        },
+        {
+          "content": "⚠ Agent run failed: boom",
+          "createdAt": "\u003ctime\u003e",
+          "id": "\u003cid11\u003e",
+          "role": "assistant",
+          "runId": "\u003cid5\u003e",
+          "seq": 6,
+          "sessionId": "\u003cid2\u003e"
+        }
+      ]
+    },
+    "status": 200,
+    "step": "transcript with feedback"
+  },
+  {
+    "body": {
+      "checksum": "sha256:\u003csum\u003e",
+      "exportedAt": "\u003ctime\u003e",
+      "format": "buildy.chat.v1",
+      "messages": [
+        {
+          "createdAt": "\u003ctime\u003e",
+          "role": "user",
+          "runId": "\u003cid3\u003e",
+          "seq": 1,
+          "text": "alpha"
+        },
+        {
+          "createdAt": "\u003ctime\u003e",
+          "role": "assistant",
+          "runId": "\u003cid3\u003e",
+          "seq": 2,
+          "text": "wrote alpha"
+        },
+        {
+          "createdAt": "\u003ctime\u003e",
+          "role": "user",
+          "runId": "\u003cid4\u003e",
+          "seq": 3,
+          "text": "x"
+        },
+        {
+          "createdAt": "\u003ctime\u003e",
+          "role": "assistant",
+          "runId": "\u003cid4\u003e",
+          "seq": 4,
+          "text": "⚠ model not available for this Cursor key — pick another model (the list is refreshed when the chat is reopened)"
+        },
+        {
+          "createdAt": "\u003ctime\u003e",
+          "role": "user",
+          "runId": "\u003cid5\u003e",
+          "seq": 5,
+          "text": "fail"
+        },
+        {
+          "createdAt": "\u003ctime\u003e",
+          "role": "assistant",
+          "runId": "\u003cid5\u003e",
+          "seq": 6,
+          "text": "⚠ Agent run failed: boom"
+        }
+      ],
+      "projectId": "\u003cid1\u003e",
+      "session": {
+        "id": "\u003cid2\u003e",
+        "runtime": "cursor-sdk",
+        "title": "alpha"
+      }
+    },
+    "status": 200,
+    "step": "export"
+  },
+  {
+    "body": null,
+    "status": 204,
+    "step": "abort"
+  },
+  {
+    "body": {
+      "agent_sandbox": false,
+      "agent_unsandboxed": false,
+      "local_folder": true,
+      "preview_local": false,
+      "seam": "1",
+      "templates": true,
+      "version": "test",
+      "worktrees": true
+    },
+    "status": 200,
+    "step": "capabilities, sandbox off"
+  },
+  {
+    "body": {
+      "error": "The agent is off on this machine: sandbox preflight failed"
+    },
+    "status": 503,
+    "step": "prompt, sandbox off"
+  },
+  {
+    "body": {
+      "error": "No Cursor API key configured — add one in Settings"
+    },
+    "status": 503,
+    "step": "prompt, no key"
+  },
+  {
+    "body": {
+      "agent_sandbox": true,
+      "agent_unsandboxed": true,
+      "local_folder": true,
+      "preview_local": false,
+      "seam": "1",
+      "templates": true,
+      "version": "test",
+      "worktrees": true
+    },
+    "status": 200,
+    "step": "capabilities, unsandboxed"
+  },
+  {
+    "body": {
+      "error": "workspace has .cursor/hooks.json; remove it to run the agent (it could change the agent's sandbox or hooks)"
+    },
+    "status": 409,
+    "step": "prompt, project hooks.json"
+  },
+  {
+    "body": null,
+    "status": 204,
+    "step": "delete session"
+  },
+  {
+    "body": {
+      "error": "Chat not found"
+    },
+    "status": 404,
+    "step": "session gone"
+  },
+  {
+    "body": {
+      "error": "Only the Cursor key is kept by this app"
+    },
+    "status": 404,
+    "step": "delete credential, wrong slot"
+  },
+  {
+    "body": null,
+    "status": 204,
+    "step": "delete credential"
+  },
+  {
+    "body": {
+      "credentials": []
+    },
+    "status": 200,
+    "step": "credentials, none again"
+  }
+]

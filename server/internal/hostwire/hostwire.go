@@ -14,8 +14,9 @@ import (
 
 	"github.com/buildytech/vibechat-desktop/internal/appid"
 	assets "github.com/buildytech/vibechat-desktop/server"
-	"github.com/buildytech/vibechat-desktop/server/internal/agent"
 	"github.com/buildytech/vibechat-desktop/server/internal/bridge"
+	"github.com/buildytech/vibechat-desktop/server/internal/codingagent"
+	"github.com/buildytech/vibechat-desktop/server/internal/codingagent/cursor"
 	"github.com/buildytech/vibechat-desktop/server/internal/host"
 	"github.com/buildytech/vibechat-desktop/server/internal/secrets"
 	"github.com/buildytech/vibechat-desktop/server/internal/store"
@@ -34,7 +35,10 @@ func Exe() string {
 type Config struct {
 	DataDir, ProjectsDir string
 	// Keys stores the Cursor key (secrets.File).
-	Keys host.KeyStore
+	Keys codingagent.KeyStore
+	// Runtime is the coding-agent runtime of new chats (the server's contour config): "" = cursor-sdk. A runtime this
+	// build does not have is an error at start, never a silent fallback to another provider.
+	Runtime string
 	// Preview runs dev servers (preview.NewGateway: one gateway port for every preview).
 	Preview host.Preview
 	// InstanceID, PreviewPort and Tickets: see host.Options (server only).
@@ -53,14 +57,19 @@ func New(seam host.Seam, c Config) (*host.Host, func(), error) {
 	}
 	exe := Exe()
 	install, locErr := bridge.Locate(exe, os.Getenv)
-	runner := agent.NewRunner(agent.RunnerOptions{Install: install, Located: locErr, Keys: c.Keys, DataDir: c.DataDir, HookExe: exe, Log: logf})
+	runner := cursor.NewRunner(cursor.RunnerOptions{Install: install, Located: locErr, Keys: c.Keys, DataDir: c.DataDir, HookExe: exe, Log: logf})
 	if err := runner.SandboxError(); err != nil {
 		log.Printf("agent disabled (fail closed): %v", err)
 	} else {
 		log.Printf("agent: cursor-sdk-bridge %s with the SDK sandbox", install.Manifest.Describe())
 	}
+	agents, err := codingagent.NewRegistry(c.Runtime, cursor.NewAdapter(runner, c.Keys))
+	if err != nil {
+		runner.Close()
+		return nil, nil, fmt.Errorf("coding agent runtime: %w", err)
+	}
 	h := host.New(host.Options{
-		Seam: seam, Version: appid.Version, Store: st, Agent: runner, Keys: c.Keys, Templates: assets.Templates(),
+		Seam: seam, Version: appid.Version, Store: st, Agents: agents, Templates: assets.Templates(),
 		Preview: c.Preview, ProjectsDir: c.ProjectsDir, WorktreesDir: filepath.Join(c.DataDir, "worktrees"), Log: logf,
 		InstanceID: c.InstanceID, PreviewPort: c.PreviewPort, Tickets: c.Tickets,
 	})
@@ -68,7 +77,7 @@ func New(seam host.Seam, c Config) (*host.Host, func(), error) {
 	return h, func() {
 		once.Do(func() {
 			h.Close()
-			runner.Close()
+			agents.Close()
 		})
 	}, nil
 }
@@ -83,12 +92,12 @@ func (k fixedKey) Key() (string, string) { return string(k), "smoke" }
 func BridgeSmoke(data, logFile string) int {
 	exe := Exe()
 	install, locErr := bridge.Locate(exe, os.Getenv)
-	runner := agent.NewRunner(agent.RunnerOptions{Install: install, Located: locErr, Keys: fixedKey("smoke-placeholder-key"), DataDir: data, HookExe: exe, Log: func(s string) { log.Print(s) }})
+	runner := cursor.NewRunner(cursor.RunnerOptions{Install: install, Located: locErr, Keys: fixedKey("smoke-placeholder-key"), DataDir: data, HookExe: exe, Log: func(s string) { log.Print(s) }})
 	defer runner.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	url, err := runner.Probe(ctx)
-	if errors.Is(err, agent.ErrSandboxUnsupported) {
+	if errors.Is(err, cursor.ErrSandboxUnsupported) {
 		fmt.Printf("bridge smoke: SKIP (no SDK sandbox on this machine): %v\nlog: %s\n", err, logFile)
 		return 3
 	}
@@ -103,7 +112,7 @@ func BridgeSmoke(data, logFile string) int {
 // CheckKey is `--check-key` for bug reports: the stored key's non-secret diagnostic, then Me and an agent create
 // through the bundled bridge, each with Cursor's answer. Output goes to stdout and the log. setKeyHint names how to
 // store a key in this binary.
-func CheckKey(data, logFile string, keys host.KeyStore, setKeyHint string) int {
+func CheckKey(data, logFile string, keys codingagent.KeyStore, setKeyHint string) int {
 	say := func(format string, args ...any) {
 		line := fmt.Sprintf(format, args...)
 		fmt.Println(line)
@@ -123,7 +132,7 @@ func CheckKey(data, logFile string, keys host.KeyStore, setKeyHint string) int {
 	}
 	exe := Exe()
 	install, locErr := bridge.Locate(exe, os.Getenv)
-	runner := agent.NewRunner(agent.RunnerOptions{Install: install, Located: locErr, Keys: keys, DataDir: data, HookExe: exe, Log: func(s string) { log.Print(s) }})
+	runner := cursor.NewRunner(cursor.RunnerOptions{Install: install, Located: locErr, Keys: keys, DataDir: data, HookExe: exe, Log: func(s string) { log.Print(s) }})
 	defer runner.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -134,7 +143,7 @@ func CheckKey(data, logFile string, keys host.KeyStore, setKeyHint string) int {
 		}
 		code = 1
 		say("FAIL %s: %v", step, err)
-		if agent.IsUnauthenticated(err) {
+		if cursor.IsUnauthenticated(err) {
 			say("hint: %s", secrets.AuthHint(key, source))
 		}
 	}
@@ -150,9 +159,9 @@ func CheckKey(data, logFile string, keys host.KeyStore, setKeyHint string) int {
 	if err == nil {
 		say("ok model list: %d entries", len(menu))
 	}
-	sel, err := runner.Select(ctx, agent.AutoID, nil)
+	sel, err := runner.Select(ctx, cursor.AutoID, nil)
 	if err != nil {
-		sel = agent.Selection{ID: "default"}
+		sel = cursor.Selection{ID: "default"}
 	}
 	id, err := runner.EnsureAgent(ctx, "", ws, sel)
 	report("agent create", err)
