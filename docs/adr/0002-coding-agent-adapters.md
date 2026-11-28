@@ -206,6 +206,13 @@ contour (list and single block, validation, menu and default, the shipped exampl
 (`VIBECHAT_LIVE=1`, off by default; real Pi, a contour file, the three steps; `VIBECHAT_LIVE_ENVMAP` reads the keys from variables of another
 name, `VIBECHAT_LIVE_DUMP` records bodies, never headers).
 
+**Sandbox server status (container `vibechat-owner`, after v0.2.13).** The service runs 0.2.13 with `contour.json` =
+`docs/contours/ru-cloudru-openrouter.json`; keys `VIBECHAT_CLOUDRU_KEY` and `VIBECHAT_OPENROUTER_KEY` live in `/etc/vibechat/pi.env` (root, 0600,
+put there through stdin); egress is the npm, Bun, Debian, GitHub, Go and the two provider hosts (the Cursor hosts were removed: the contour
+runs Pi only; backups `egress.domains.bak-t303` and `.bak-t304` on the host, `contour.json.bak-t304` in the data folder). `doctor` is green for the
+contour, both jails, Pi and both keys. A real chat through a temporary instance of the same binary (own data folder and token, production token
+untouched): the default `cloudru/gigachat-4` and the second model `openrouter/gpt-oss-120b` each wrote a file through the gateway.
+
 ## RU contour spike: GigaChat vs Yandex AI Studio (from official docs, no API calls, no keys used)
 
 What Pi needs from a provider (Pi docs, `models.json`): `baseUrl`, `"api": "openai-completions"` (or `openai-responses`), `apiKey` as a literal, `$ENV` or `!command` (run at request time, not cached), headers with the same interpolation. Coding needs OpenAI-style `tools` / `tool_calls` and SSE streaming.
