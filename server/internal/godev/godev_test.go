@@ -136,3 +136,22 @@ func TestFingerprintIgnoresGeneratedAndOutput(t *testing.T) {
 		t.Fatal("b.templ has no b_templ.go: stale")
 	}
 }
+
+func TestBuildingPageWaitUi(t *testing.T) {
+	for _, want := range []string{
+		"Building the Go site",
+		"templ generate, go build",
+		"prefers-reduced-motion",
+		`role="status"`,
+		"aria-busy",
+		"elapsed",
+		"This page reloads by itself",
+	} {
+		if !strings.Contains(buildingPage, want) {
+			t.Fatalf("building page: missing %q", want)
+		}
+	}
+	if strings.Contains(buildingPage, "percent complete") || strings.Contains(buildingPage, "% complete") {
+		t.Fatal("building page must not invent a percentage")
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	_ "embed"
 	"fmt"
 	"io"
 	"io/fs"
@@ -214,11 +215,10 @@ func (l *loop) stop() {
 	l.cmd = nil
 }
 
-const buildingPage = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="3">
-<title>Building…</title></head><body style="font:16px system-ui;margin:3rem">Building the Go site (templ generate, go build)…
-this page reloads by itself.</body></html>`
+//go:embed building.html
+var buildingPage string
 
-// serveBuilding answers 503 with a self-reloading page while the first build runs.
+// serveBuilding answers 503 with a self-reloading wait page while the first build runs.
 func (l *loop) serveBuilding() {
 	l.serve(http.StatusServiceUnavailable, "text/html; charset=utf-8", buildingPage)
 }
