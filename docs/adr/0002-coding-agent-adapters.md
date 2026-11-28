@@ -130,6 +130,15 @@ through the gateway, three steps in one resumed chat (write a file, edit it, run
 ids, the file ends as asked and `python3 hello.py` prints the new text; Pi's thinking deltas map to `thinking.*` events.
 `TestLiveCodingTask` (`VIBECHAT_LIVE=1`, off by default) repeats it against any provider.
 
+**Sandbox server pilot (container `vibechat-owner`, 2026-11-28).** Prepared with the standard tools only: Node 22.23.5 in
+`/opt/vibechat/node`, the pinned Pi (`fetch-pi`) in `/opt/vibechat/pi`, `openrouter.ai` added to `/etc/vibechat/egress.domains`
+and applied with `vibechat-egress` (the container's ACL: still the Cursor, npm, Bun, GitHub and Go hosts, plus OpenRouter), the key in
+`/etc/vibechat/pi.env` (root, 0600) loaded by the unit through a drop-in `EnvironmentFile=`, never readable by the `vibechat` user
+or the jail. The adapter's e2e suite (real Pi in bubblewrap, stub provider) and `TestLiveCodingTask` (real OpenRouter, gpt-oss-120b)
+pass in the container as the `vibechat` user. The running service is still 0.2.11 (no Pi code): switching it to Pi needs a release
+with this code (tag, then `vibechat-server update`) and `contour.json` (a prepared `contour.json.openrouter-pilot` sits next to the
+data; `runtime: pi` moves new chats from Cursor to Pi). Not done on purpose: the release.
+
 ## RU contour spike: GigaChat vs Yandex AI Studio (from official docs, no API calls, no keys used)
 
 What Pi needs from a provider (Pi docs, `models.json`): `baseUrl`, `"api": "openai-completions"` (or `openai-responses`), `apiKey` as a literal, `$ENV` or `!command` (run at request time, not cached), headers with the same interpolation. Coding needs OpenAI-style `tools` / `tool_calls` and SSE streaming.
