@@ -2,7 +2,8 @@ package main
 
 import "strings"
 
-// settingsRoute is the app's Settings screen (the Studio Settings screen, apps/web/src/Settings.tsx).
+// settingsRoute is the Settings screen of the server's Studio (studio apps/studio/src/settings, ADR 0007: it opens
+// the first section; the connection is the Server section).
 const settingsRoute = "/settings"
 
 // settingsAccelerator opens Settings the way desktop apps do.

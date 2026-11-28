@@ -645,3 +645,41 @@ func TestStartResumeShowsConnecting(t *testing.T) {
 		t.Fatalf("after a failed reconnect: %+v", c)
 	}
 }
+
+// TestOpenSettingsRoute: File → Settings. Connected, the window gets a fresh sign-in on the server's origin that
+// moves on to /settings (a server that still answers 303 too, through the proxy); a path of another origin is never
+// passed on; not connected, the start screen.
+func TestOpenSettingsRoute(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	for _, legacy := range []bool{false, true} {
+		r := newRigWith(t, 1, legacy)
+		r.m.Open(ctx, "/settings")
+		if u := r.navigated(); u != "/" {
+			t.Fatalf("not connected: %q", u)
+		}
+		if c := r.connect(testToken); c.Problem != nil {
+			t.Fatal(c.Problem)
+		}
+		u := r.navigated()
+		origin := u[:strings.Index(u, "/auth/")]
+		c := browser(t)
+		signIn(t, c, u, origin)
+		for route, want := range map[string]string{"/settings": `content="0;url=/settings"`, "//evil.example": `content="0;url=/"`} {
+			r.m.Open(ctx, route)
+			u = r.navigated()
+			if !strings.HasPrefix(u, origin+"/auth/session?") || strings.Contains(u, testToken) {
+				t.Fatalf("legacy=%v open %s: %q", legacy, route, u)
+			}
+			res, err := c.Get(u)
+			if err != nil {
+				t.Fatal(err)
+			}
+			page, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != 200 || !strings.Contains(string(page), want) {
+				t.Fatalf("legacy=%v open %s: %d %s", legacy, route, res.StatusCode, page)
+			}
+		}
+	}
+}

@@ -9,15 +9,16 @@ import (
 	"github.com/buildytech/vibechat-desktop/internal/appid"
 )
 
-// appMenu is the native application menu: Settings… (CmdOrCtrl+,) navigates the main window to the Settings screen
-// ; the rest are the platform's standard menus.
-func appMenu(app *application.App, window func() *application.WebviewWindow) *application.Menu {
+// appMenu is the native application menu: Settings… (CmdOrCtrl+,) opens the Settings screen of the server's Studio
+// through open (remote.Manager.Open: a fresh sign-in on the server's origin; not connected, the start screen); the
+// rest are the platform's standard menus.
+func appMenu(window func() *application.WebviewWindow, open func(route string)) *application.Menu {
 	openSettings := func(*application.Context) {
 		if w := window(); w != nil {
-			w.SetURL(settingsRoute)
 			w.Show()
 			w.Focus()
 		}
+		go open(settingsRoute)
 	}
 	return buildMenu(goruntime.GOOS, settingsLabel(os.Getenv), openSettings)
 }

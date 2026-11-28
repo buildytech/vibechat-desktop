@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -72,7 +73,12 @@ func main() {
 			Middleware: func(next http.Handler) http.Handler { return conn.Middleware(seamNotFound(seam.Prefix, next)) },
 		},
 	})
-	if menu := appMenu(app, func() *application.WebviewWindow { return mainWindow }); menu != nil {
+	openRoute := func(route string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		conn.Open(ctx, route)
+	}
+	if menu := appMenu(func() *application.WebviewWindow { return mainWindow }, openRoute); menu != nil {
 		app.Menu.Set(menu)
 	}
 	mainWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{

@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/buildytech/vibechat-desktop/protocol/auth"
 )
 
 // Problem codes (DesktopProblemCodeSchema).
@@ -353,6 +355,32 @@ func (m *Manager) connect(ctx context.Context, in ConnectInput, resume bool) {
 	m.o.Log(fmt.Sprintf("remote: connected to %s (vibechat-server %s, protocol %d) at %s", addr, hello.ServerVersion, hello.Protocol, origin))
 	u := origin + m.o.SessionPath + "?" + url.Values{m.o.TicketParam: {ticket}}.Encode()
 	go m.o.Navigate(u)
+}
+
+// Open moves the window to route of the server's Studio (the native menu's Settings…). Connected: a fresh one-time
+// ticket and /auth/session?ticket=…&next=route on the server's origin, so the session cookie is set by that origin
+// whatever page the window shows now (a plain SetURL("/settings") resolved against the app's own origin and left the
+// window on the start screen). Not connected: the start screen, which is the connection settings.
+func (m *Manager) Open(ctx context.Context, route string) {
+	m.mu.Lock()
+	s, origin := m.sess, m.origin
+	m.mu.Unlock()
+	if s == nil || origin == "" {
+		m.o.Navigate("/")
+		return
+	}
+	route = auth.SafeNext(route)
+	token, err := m.o.Creds.Get(CredHostToken)
+	if err == nil {
+		var ticket string
+		if ticket, err = s.ticket(ctx, m.o.Prefix, strings.TrimSpace(token)); err == nil {
+			m.o.Navigate(origin + m.o.SessionPath + "?" + url.Values{m.o.TicketParam: {ticket}, auth.NextParam: {route}}.Encode())
+			return
+		}
+	}
+	// No ticket (keychain, server): the window's own session cookie may still be good.
+	m.o.Log("remote: open " + route + ": " + err.Error())
+	m.o.Navigate(origin + route)
 }
 
 // keepTarget saves next after a failed SSH step when it is a new server (so its address shows) and keeps the old

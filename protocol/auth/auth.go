@@ -16,8 +16,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -179,7 +181,8 @@ func (a *TokenAuth) redeem(ticket string) (string, bool) {
 	return s, true
 }
 
-// SessionHandler is GET /auth/session?ticket=…: a valid ticket sets the session cookie and moves on to "/".
+// SessionHandler is GET /auth/session?ticket=…[&next=/path]: a valid ticket sets the session cookie and moves on to
+// next (a same-origin path, SafeNext) or "/".
 func (a *TokenAuth) SessionHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -192,7 +195,7 @@ func (a *TokenAuth) SessionHandler() http.Handler {
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: s, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
-		WriteSignedInPage(w)
+		WriteSignedInPage(w, r.URL.Query().Get(NextParam))
 	})
 }
 
@@ -202,12 +205,44 @@ func (a *TokenAuth) SessionHandler() http.Handler {
 // started by this origin.
 const SignedInHTML = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=/"><title>VibeChat</title></head><body><a href="/">Continue</a></body></html>`
 
-// WriteSignedInPage answers SignedInHTML (200, no-store).
-func WriteSignedInPage(w http.ResponseWriter) {
+// NextParam names the path the sign-in page moves on to (the desktop app's File → Settings opens /settings).
+const NextParam = "next"
+
+// SafeNext is next when it is a path of this origin ("/settings", "/p/abc?x=1"), else "/": never a scheme, a host,
+// "//" or "/\\" (protocol-relative), control characters or more than 512 bytes.
+func SafeNext(next string) string {
+	if next == "" || len(next) > 512 || next[0] != '/' || strings.HasPrefix(next, "//") || strings.HasPrefix(next, "/\\") {
+		return "/"
+	}
+	for _, c := range next {
+		if c < 0x20 || c == 0x7f || c == '\\' {
+			return "/"
+		}
+	}
+	u, err := url.Parse(next)
+	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil {
+		return "/"
+	}
+	return next
+}
+
+// SignedInPage is SignedInHTML moving on to SafeNext(next) instead of "/".
+func SignedInPage(next string) string {
+	n := SafeNext(next)
+	if n == "/" {
+		return SignedInHTML
+	}
+	e := html.EscapeString(n)
+	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=` + e + `"><title>VibeChat</title></head><body><a href="` + e + `">Continue</a></body></html>`
+}
+
+// WriteSignedInPage answers SignedInPage(next) (200, no-store).
+func WriteSignedInPage(w http.ResponseWriter, next string) {
+	page := SignedInPage(next)
 	w.Header().Set("cache-control", "no-store")
 	w.Header().Set("content-type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(SignedInHTML))
+	_, _ = w.Write([]byte(page))
 }
 
 // LoopbackHost reports whether a Host header names this machine by a literal that DNS cannot repoint: 127.0.0.1,

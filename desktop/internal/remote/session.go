@@ -281,17 +281,25 @@ func (s *session) serveProxy(port int, prefix, sessionPath string, local func(w 
 					return err
 				}
 			}
-			if res.Request.URL.Path != sessionPath || res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/" {
+			if res.Request.URL.Path != sessionPath {
 				return nil
 			}
+			next := res.Request.URL.Query().Get(auth.NextParam)
+			legacy := res.StatusCode == http.StatusSeeOther && res.Header.Get("Location") == "/"
+			// A server before 0.2.11 ignores next (File → Settings): a signed-in page with a next is answered here too.
+			if !legacy && (res.StatusCode != http.StatusOK || auth.SafeNext(next) == "/") {
+				return nil
+			}
+			page := auth.SignedInPage(next)
 			_ = res.Body.Close()
 			res.StatusCode, res.Status = http.StatusOK, "200 OK"
 			res.Header.Del("Location")
+			res.Header.Del("Content-Encoding")
 			res.Header.Set("content-type", "text/html; charset=utf-8")
 			res.Header.Set("cache-control", "no-store")
-			res.Header.Set("content-length", strconv.Itoa(len(auth.SignedInHTML)))
-			res.ContentLength = int64(len(auth.SignedInHTML))
-			res.Body = io.NopCloser(strings.NewReader(auth.SignedInHTML))
+			res.Header.Set("content-length", strconv.Itoa(len(page)))
+			res.ContentLength = int64(len(page))
+			res.Body = io.NopCloser(strings.NewReader(page))
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {

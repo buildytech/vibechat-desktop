@@ -256,3 +256,42 @@ func TestSSEFlushesThroughTheMiddleware(t *testing.T) {
 		t.Fatal("the event was buffered: no flush through the middleware")
 	}
 }
+
+// File → Settings in the desktop app: the sign-in page moves on to next, a path of this origin only.
+func TestSignInMovesOnToASameOriginPath(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                             "/",
+		"/settings":                    "/settings",
+		"/settings/appearance":         "/settings/appearance",
+		"/p/abc?x=1":                   "/p/abc?x=1",
+		"//evil.example/x":             "/",
+		"/\\evil.example":              "/",
+		"https://evil.example/":        "/",
+		"settings":                     "/",
+		"/a\nb":                        "/",
+		"javascript:alert(1)":          "/",
+		"/" + strings.Repeat("a", 600): "/",
+	} {
+		if got := SafeNext(in); got != want {
+			t.Errorf("SafeNext(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if SignedInPage("") != SignedInHTML || SignedInPage("//x") != SignedInHTML {
+		t.Fatal("no next: the page moves on to /")
+	}
+	if p := SignedInPage(`/settings?a="b"&c=<d>`); !strings.Contains(p, `content="0;url=/settings?a=&#34;b&#34;&amp;c=&lt;d&gt;"`) {
+		t.Fatalf("next is escaped in the page: %s", p)
+	}
+
+	tok, _ := NewToken()
+	a := NewTokenAuth(tok)
+	srv := server(t, a)
+	res := do(t, "POST", srv.URL+prefix+"/auth/ticket", map[string]string{"Authorization": "Bearer " + tok})
+	var tk map[string]string
+	_ = json.NewDecoder(res.Body).Decode(&tk)
+	res = do(t, "GET", srv.URL+SessionPath+"?ticket="+tk["ticket"]+"&"+NextParam+"=%2Fsettings", nil)
+	page, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(page), `content="0;url=/settings"`) {
+		t.Fatalf("session with next: %d %s", res.StatusCode, page)
+	}
+}
