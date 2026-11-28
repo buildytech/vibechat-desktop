@@ -58,12 +58,12 @@ func Menu(provider string, ms []ModelEntry) []codingagent.Model {
 	return out
 }
 
-// GatewayEnv is the environment variable of the jail that holds the run's gateway token; models.json refers to it as
-// "$VIBECHAT_GATEWAY_KEY" and never contains it.
-const GatewayEnv = "VIBECHAT_GATEWAY_KEY"
+// apiKeyPlaceholder is the "API key" Pi sends: the gateway behind the jail's socket ignores it. There is no secret in
+// the jail at all.
+const apiKeyPlaceholder = "vibechat-no-key"
 
-// ModelsJSON is Pi's models.json for a run: one provider (the host-side gateway at baseURL) and the contour's models.
-// The credential is the gateway token from the environment; the real provider key is never written or sent here.
+// ModelsJSON is Pi's models.json for a run: one provider (the relay to the host-side gateway at baseURL) and the
+// contour's models. The "key" is a placeholder; the real provider key is never written or sent here.
 func ModelsJSON(provider, baseURL string, ms []ModelEntry, extraCompat map[string]any) ([]byte, error) {
 	if err := ValidateModels(ms); err != nil {
 		return nil, err
@@ -89,7 +89,7 @@ func ModelsJSON(provider, baseURL string, ms []ModelEntry, extraCompat map[strin
 		models = append(models, e)
 	}
 	doc := map[string]any{"providers": map[string]any{ProviderID: map[string]any{
-		"name": provider, "baseUrl": baseURL, "api": "openai-completions", "apiKey": "$" + GatewayEnv,
+		"name": provider, "baseUrl": baseURL, "api": "openai-completions", "apiKey": apiKeyPlaceholder,
 		"compat": compat, "models": models,
 	}}}
 	return json.MarshalIndent(doc, "", "  ")

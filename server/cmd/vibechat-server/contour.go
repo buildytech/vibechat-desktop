@@ -69,6 +69,11 @@ func contourChecks(p paths) []check {
 		cs = append(cs, bad("pi jail", "Pi runs only in bubblewrap: "+err.Error()))
 	} else {
 		cs = append(cs, ok("pi jail", "bubblewrap works"))
+		if err := isolate.NestedJailAvailable(); err != nil {
+			cs = append(cs, bad("pi shell jail", "the agent's shell needs a nested jail with no network: "+err.Error()))
+		} else {
+			cs = append(cs, ok("pi shell jail", "the agent's shell runs in a nested jail without network"))
+		}
 	}
 	node, dir := c.Pi.Node, c.Pi.Dir
 	if node == "" {

@@ -1,7 +1,13 @@
 package providergw_test
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -141,5 +147,57 @@ func TestToolIDsOfOtherProvidersAndPlainRequestsAreLeftAlone(t *testing.T) {
 	}
 	if _, err := providergw.RestoreToolIDs([]byte(`{"tool_calls": nope`)); err == nil {
 		t.Fatal("garbage accepted")
+	}
+}
+
+// ServeUnix is the run's gateway: no token, the socket is the credential (0600, in a folder only this run's jail gets);
+// the real key goes upstream, nothing else; stopping removes the socket.
+func TestServeUnixAnswersWithoutATokenAndGoesAwayWithTheRun(t *testing.T) {
+	up := stub.OpenAI(func(n int, req stub.Request) stub.Reply { return stub.Reply{Text: "pong"} })
+	defer up.Close()
+	gw, _, ls := yandexGW(t, up, true)
+	dir, err := os.MkdirTemp("", "vcgwt-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "gw.sock")
+	stop, err := gw.ServeUnix(sock, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(sock); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("socket: %v %v", st, err)
+	}
+	hc := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+	}}}
+	resp, err := hc.Post("http://gw/v1/chat/completions", "application/json", strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"ping"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(b), "pong") {
+		t.Fatalf("%d %s", resp.StatusCode, b)
+	}
+	if r := up.Requests(); len(r) != 1 || r[0].Authorization != "Api-Key "+secret {
+		t.Fatalf("provider saw %+v", r)
+	}
+	if g, _ := hc.Get("http://gw/v1/models"); g != nil {
+		g.Body.Close()
+		if g.StatusCode == 200 {
+			t.Fatal("only chat completions is served")
+		}
+	}
+	if !strings.Contains(ls.all(), "run-1") || strings.Contains(ls.all(), secret) {
+		t.Fatalf("log: %s", ls.all())
+	}
+	stop()
+	if _, err := os.Stat(sock); !os.IsNotExist(err) {
+		t.Fatalf("socket left: %v", err)
+	}
+	if _, err := hc.Post("http://gw/v1/chat/completions", "application/json", strings.NewReader(`{}`)); err == nil {
+		t.Fatal("served after stop")
 	}
 }

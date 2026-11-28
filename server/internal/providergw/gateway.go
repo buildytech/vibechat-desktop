@@ -19,6 +19,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -127,7 +128,6 @@ func (g *Gateway) authorize(r *http.Request) (string, bool) {
 }
 
 func (g *Gateway) chat(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
 	if r.Method != http.MethodPost {
 		WriteError(w, http.StatusMethodNotAllowed, "POST only")
 		return
@@ -137,6 +137,42 @@ func (g *Gateway) chat(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusUnauthorized, "invalid gateway token")
 		return
 	}
+	g.serveChat(w, r, id)
+}
+
+// ServeUnix serves the gateway on a Unix socket at path, for one agent run: no token is involved, the socket is the
+// credential. Only the run's own jail gets it (the folder of the socket is private to the server user and is bound
+// into that jail alone, whose network namespace has nothing else to talk to). It returns the func that stops the
+// listener and removes the socket.
+func (g *Gateway) ServeUnix(path, id string) (stop func(), err error) {
+	_ = os.Remove(path)
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	_ = os.Chmod(path, 0o600)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			WriteError(w, http.StatusMethodNotAllowed, "POST only")
+			return
+		}
+		g.serveChat(w, r, id)
+	})
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 30 * time.Second, IdleTimeout: time.Minute}
+	go func() { _ = srv.Serve(ln) }()
+	return func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+		_ = srv.Close()
+		_ = os.Remove(path)
+	}, nil
+}
+
+// serveChat forwards one authorized chat-completions request to the provider.
+func (g *Gateway) serveChat(w http.ResponseWriter, r *http.Request, id string) {
+	start := time.Now()
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
 	if err != nil || len(body) > maxBody {
 		WriteError(w, http.StatusRequestEntityTooLarge, "request too large")

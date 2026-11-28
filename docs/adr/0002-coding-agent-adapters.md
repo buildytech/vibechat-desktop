@@ -100,10 +100,42 @@ server/cmd/fetch-pi/                    download (or -tarball), verify, install;
 
 1. **GigaChat tool round-trip.** The documented format is implemented and stub-tested, but `functions_state_id` handling, schema limits of GigaChat-2 (union types), and the behavior of tool loops with real answers are unverified. Needs the golden live run.
 2. **Yandex specifics.** Whether the endpoint accepts `stream_options.include_usage` and `max_tokens` as Pi sends them, the exact model URIs and their tool-call quality over long loops, and the logging terms of `x-data-logging-enabled`. `compat` can be tuned per provider (the generator takes extra compat fields) once seen live.
-3. **Gateway token in the agent shell.** Pi's bash tool inherits Pi's environment, so the per-run gateway token is readable by the agent. It is loopback-only and dies with the run, but while the run lasts the agent can call the gateway (and so spend the provider quota) outside Pi, and the jail shares the host network (Pi needs TCP to the loopback gateway), so other loopback services are reachable (the API needs the host token). Next hardening: a unix socket or a network namespace with only the gateway forwarded.
-4. **Network egress of the jail** is limited by the server's container policy, not by the jail: `egress-domains` is the list to apply; applying it on the RU server and testing it is open.
-5. **Git in a worktree chat.** The worktree's `.git` file points into the project folder, which is hidden in the jail, so `git` inside Pi's shell may not work there; the host lands and commits the worktree itself. To be checked live.
+3. **(closed in step 4) Gateway token in the agent shell.** Pi's bash tool inherits Pi's environment, so the per-run gateway token is readable by the agent. It is loopback-only and dies with the run, but while the run lasts the agent can call the gateway (and so spend the provider quota) outside Pi, and the jail shares the host network (Pi needs TCP to the loopback gateway), so other loopback services are reachable (the API needs the host token). Next hardening: a unix socket or a network namespace with only the gateway forwarded.
+4. **(closed for the agent's shell in step 4) Network egress of the jail** is limited by the server's container policy, not by the jail: `egress-domains` is the list to apply; applying it on the RU server and testing it is open.
+5. **(closed in step 4) Git in a worktree chat.** The worktree's `.git` file points into the project folder, which is hidden in the jail, so `git` inside Pi's shell may not work there; the host lands and commits the worktree itself. To be checked live.
 6. **Windows and macOS** have no jail: Pi is Linux-only by design (Ready fails closed elsewhere).
+
+## Step 4: the gaps closed (2026-11-28)
+
+**No secret in the jail, no network for the shell.** Pi's jail now has a network namespace of its own (`isolate.Spec.NoNet`,
+bubblewrap `--unshare-net`; only a loopback of its own). The way to the model is a Unix socket made for the run
+(`providergw.Gateway.ServeUnix`, 0600, in a private temp folder bound into the jail at `/tmp/vc-gw`); inside, a 20-line relay
+(`relay.js`, loaded into Pi with `node --require`) listens on `127.0.0.1:18199` and carries the bytes to the socket. The socket is the
+credential: there is no gateway token any more (models.json holds a placeholder key), so nothing secret is in Pi's environment,
+argv, files or `/proc`, also not for Pi's own `read` tool. Pi's shell tool is configured (`settings.json`, `shellPath`) to
+start a wrapper (`isolate.ToolShellScript`) that runs bash in a **nested** bubblewrap jail: its own empty network namespace (no
+gateway, no host loopback, no internet), its own PID namespace and `/proc` (Pi and its environment are not visible), empty tmpfs over the
+socket folder and the agent's own folders, and the gateway variables unset. `settings.json` and `models.json` are read-only
+mounts, the wrapper and the relay live in a read-only per-run folder, so the agent cannot take the wrapper away. If the nested jail does
+not work (user namespaces limited), `Ready` fails and `doctor` reports `pi shell jail`; nothing falls back.
+Tests (fake Pi and real Pi): the jail's interfaces are `lo` only; a connect to the stub provider's host port, to the relay port and to the
+internet fails from the shell; no `gw.sock` is visible; the shell sees only its own processes; no token or key in any `environ`; the run's
+socket is removed afterwards; negative controls (without the mounts the git test fails). Not done: Pi itself (not its shell) has
+no internet either now, but a Pi bug is still Pi's; the container's egress list stays the server owner's policy.
+
+**Git in the jail.** A linked worktree's `.git` file points into the project's repository (hidden data folder), so the jail binds the
+repository read-only and gives back read-write only the worktree's own folder, the object store, the refs and their logs
+(`gitMounts`); the project folder's own `.git` keeps `config`, `hooks` and `info` read-only (mounted last, over the writable
+folder). The agent's own `git init`, `status`, `add`, `commit` work with the VibeChat identity; the host lands the branch as before.
+Verified with the real Pi in bubblewrap on the box and in the sandbox server's container as the service user.
+**Finding fixed on the way (affects every runtime, found while testing git):** the agent can write its worktree, and git on the
+host trusted what it found there: a `.git` folder of its own or a changed `commondir`, with a config naming `core.fsmonitor`
+(or a filter or merge driver), made the host's next `git status` run that program outside every jail, with the server's
+environment. `gitx.GuardWorktree` (called before the host's git in a worktree, restores the `.git` file, `commondir`, removes
+`config.worktree`), `checkConfig` (`gitx.Run` refuses a repository whose config can run a program or include a file) and
+command-line switches (`core.fsmonitor=false`, no pager/editor/ssh command/credential helper, `gc.auto=0`) close it; tests include the
+attack from the agent's real shell. A project's own `.git/config` can still be rewritten by project tools that run in the other jail
+(bun, dev server) before `checkConfig` refuses it; refusing is the safe outcome.
 
 ## Step 3: providers as data, live findings (2026-11-28)
 

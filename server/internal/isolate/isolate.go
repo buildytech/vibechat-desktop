@@ -45,6 +45,17 @@ type Spec struct {
 	// RequireJail refuses to run without bubblewrap whatever Config.Require says (and on non-Linux systems): the
 	// coding agent of the RU contour never runs outside the jail.
 	RequireJail bool
+	// NoNet gives the jail its own network namespace: only a loopback of its own, nothing of the host's (no gateway, no
+	// internet). What the program must reach comes in as a bound Unix socket (Binds).
+	NoNet bool
+	// Binds are folders or files bound at another path in the jail (src on the host, dst inside).
+	Binds []Bind
+}
+
+// Bind is one mount of a folder or file at another path of the jail.
+type Bind struct {
+	Src, Dst string
+	Writable bool
 }
 
 // Modes reported by Command.
@@ -285,8 +296,11 @@ func Command(argv []string, s Spec) (out []string, env []string, mode string, er
 	if h := getenv(env, "HOME"); h == "" || hidden(filepath.Clean(h)) {
 		env = setAll(env, []string{"HOME=/tmp"})
 	}
-	a := []string{bwrap, "--die-with-parent", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try",
-		"--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"}
+	a := []string{bwrap, "--die-with-parent", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try"}
+	if s.NoNet {
+		a = append(a, "--unshare-net") // bwrap brings the namespace's own loopback up
+	}
+	a = append(a, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp")
 	for _, h := range cfg.Hide {
 		if st, err := os.Stat(h); err == nil && st.IsDir() {
 			a = append(a, "--tmpfs", h)
@@ -328,6 +342,17 @@ func Command(argv []string, s Spec) (out []string, env []string, mode string, er
 			return nil, nil, "", err
 		}
 		a = append(a, "--bind", w, w)
+	}
+	// Binds come last: they may sit inside a writable folder (a read-only file in it).
+	for _, b := range s.Binds {
+		if b.Src == "" || b.Dst == "" {
+			continue
+		}
+		mode := "--ro-bind"
+		if b.Writable {
+			mode = "--bind"
+		}
+		a = append(a, mode, b.Src, b.Dst)
 	}
 	a = append(a, "--chdir", dir, "--")
 	return append(a, argv...), env, mode, nil

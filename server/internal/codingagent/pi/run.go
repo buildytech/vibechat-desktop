@@ -2,6 +2,7 @@ package pi
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -124,15 +125,22 @@ func (t *tail) String() string {
 func (r *run) drive(ctx context.Context, runID string, p codingagent.Prompt, emit func(codingagent.Event)) (err error) {
 	defer r.markStarted()
 	a := r.s.a
-	base, err := a.gateway()
-	if err != nil {
-		return fmt.Errorf("provider gateway: %w", err)
-	}
 	if err := a.Ready(); err != nil {
 		return err
 	}
-	token, revoke := a.o.Gateway.Mint()
-	defer revoke()
+	// The agent reaches the provider gateway through a Unix socket made for this run alone, bound into a jail whose
+	// network namespace holds nothing else. No token exists: the socket is the credential, and the agent's shell
+	// (a nested jail, see isolate.ToolShellScript) has neither the socket nor any network.
+	gwDir, err := os.MkdirTemp("", "vcgw-")
+	if err != nil {
+		return fmt.Errorf("provider gateway: %w", err)
+	}
+	defer os.RemoveAll(gwDir)
+	stopGW, err := a.o.Gateway.ServeUnix(filepath.Join(gwDir, "gw.sock"), "run-"+shortID(runID))
+	if err != nil {
+		return fmt.Errorf("provider gateway: %w", err)
+	}
+	defer stopGW()
 
 	// The per-run agent folder holds the generated models.json (no secret in it: the key is the token in the
 	// environment) and is removed afterwards. The session folder is the chat's and stays for the next prompt.
@@ -145,23 +153,50 @@ func (r *run) drive(ctx context.Context, runID string, p codingagent.Prompt, emi
 		}
 	}
 	defer os.RemoveAll(agentDir)
-	models, err := ModelsJSON(a.o.Label, base, a.o.Models, a.o.Compat)
+	models, err := ModelsJSON(a.o.Label, "http://127.0.0.1:"+relayPort+"/v1", a.o.Models, a.o.Compat)
 	if err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(agentDir, "models.json"), models, 0o600); err != nil {
 		return err
 	}
+	// The read-only folder of the run: the relay that carries Pi to the socket, and the wrapper that runs the agent's
+	// shell in its nested jail. The agent cannot change either.
+	binDir := filepath.Join(root, "run", runID+"-bin")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		return err
+	}
+	defer os.RemoveAll(binDir)
+	relayPath := filepath.Join(binDir, "relay.js")
+	if err := os.WriteFile(relayPath, relayJS, 0o444); err != nil {
+		return err
+	}
+	toolShell, err := a.toolShell(binDir, []string{jailSockDir, agentDir, sessionDir, binDir})
+	if err != nil {
+		return err
+	}
+	settings, _ := json.Marshal(map[string]any{"shellPath": toolShell})
+	if err := os.WriteFile(filepath.Join(agentDir, "settings.json"), settings, 0o600); err != nil {
+		return err
+	}
+	gitRO, gitRW, gitLocked := gitMounts(r.s.cwd)
 
 	in := a.o.Install
-	argv := append([]string{in.Node}, args(in.Entry, agentDir, sessionDir, r.s.handle, r.s.model.ID)...)
+	argv := append([]string{in.Node, "--require", relayPath}, args(in.Entry, agentDir, sessionDir, r.s.handle, r.s.model.ID)...)
 	full, env, _, err := isolate.Command(argv, isolate.Spec{
-		Dir: r.s.cwd, Writable: []string{agentDir, sessionDir}, ReadOnly: []string{in.Dir, filepath.Dir(in.Node)}, RequireJail: true,
-		Env: []string{
-			"PI_CODING_AGENT_DIR=" + agentDir, "PI_OFFLINE=1", "PI_SKIP_VERSION_CHECK=1", GatewayEnv + "=" + token,
-			// The gateway is on loopback: a proxy of the server's environment must not be asked for it.
+		Dir: r.s.cwd, Writable: append([]string{agentDir, sessionDir}, gitRW...), RequireJail: true, NoNet: true,
+		ReadOnly: append([]string{in.Dir, filepath.Dir(in.Node), binDir}, gitRO...),
+		// Pi writes its own bookkeeping in the agent folder, but the settings (which shell it starts) and the models
+		// are read-only: the agent cannot take its shell wrapper away.
+		Binds: append([]isolate.Bind{{Src: gwDir, Dst: jailSockDir},
+			{Src: filepath.Join(agentDir, "settings.json"), Dst: filepath.Join(agentDir, "settings.json")},
+			{Src: filepath.Join(agentDir, "models.json"), Dst: filepath.Join(agentDir, "models.json")}}, gitLocked...),
+		Env: append([]string{
+			"PI_CODING_AGENT_DIR=" + agentDir, "PI_OFFLINE=1", "PI_SKIP_VERSION_CHECK=1",
+			"VIBECHAT_GW_SOCK=" + jailSockDir + "/gw.sock", "VIBECHAT_GW_PORT=" + relayPort,
+			// Everything is on loopback: a proxy of the server's environment must not be asked for it.
 			"NO_PROXY=127.0.0.1,localhost", "no_proxy=127.0.0.1,localhost",
-		},
+		}, gitEnv...),
 	})
 	if err != nil {
 		return err
@@ -196,7 +231,7 @@ func (r *run) drive(ctx context.Context, runID string, p codingagent.Prompt, emi
 		_ = stdin.Close()
 		procgroup.Stop(cmd, exited, a.o.Grace)
 	}()
-	clean := func(s string) string { return strings.ReplaceAll(s, token, "<gateway-token>") }
+	clean := func(s string) string { return s }
 
 	w := &cmdWriter{w: stdin}
 	r.mu.Lock()
@@ -332,4 +367,44 @@ func withTail(s string) string {
 		return ""
 	}
 	return ": " + clip(oneLine(s), 600)
+}
+
+//go:embed relay.js
+var relayJS []byte
+
+// relayPort is the port of Pi's gateway inside the jail's own network namespace (nothing else lives there).
+const relayPort = "18199"
+
+// jailSockDir is where the run's gateway socket folder appears in the jail.
+const jailSockDir = "/tmp/vc-gw"
+
+// gitEnv is the identity of the agent's own git commands in the jail: the host's (gitx), no config of the machine.
+var gitEnv = []string{
+	"GIT_AUTHOR_NAME=VibeChat", "GIT_AUTHOR_EMAIL=vibechat@localhost",
+	"GIT_COMMITTER_NAME=VibeChat", "GIT_COMMITTER_EMAIL=vibechat@localhost",
+	"GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0",
+}
+
+func shortID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+// toolShell writes the wrapper that runs the agent's shell commands in the nested jail and answers its path.
+func (a *Adapter) toolShell(binDir string, mask []string) (string, error) {
+	bash, err := isolate.ResolveBash()
+	if err != nil {
+		return "", fmt.Errorf("the agent's shell: %w", err)
+	}
+	script, err := isolate.ToolShellScript(isolate.BwrapPath(), bash, mask, "VIBECHAT_GW_SOCK", "VIBECHAT_GW_PORT", "PI_CODING_AGENT_DIR")
+	if err != nil {
+		return "", err
+	}
+	p := filepath.Join(binDir, "tool-shell")
+	if err := os.WriteFile(p, []byte(script), 0o555); err != nil {
+		return "", err
+	}
+	return p, nil
 }

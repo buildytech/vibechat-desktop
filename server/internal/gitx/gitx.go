@@ -18,9 +18,18 @@ import (
 func Run(ctx context.Context, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	full := append([]string{"-C", dir, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main", "-c", "core.autocrlf=false"}, args...)
+	if cfg := configOf(dir); cfg != "" {
+		if err := checkConfig(cfg); err != nil {
+			return "", fmt.Errorf("git %s: the repository config has a setting that can run a program (%v); not running git there", strings.Join(args, " "), err)
+		}
+	}
+	// What can run a program is switched off on the command line too, whatever a config says.
+	full := append([]string{"-C", dir, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main", "-c", "core.autocrlf=false",
+		"-c", "core.fsmonitor=false", "-c", "core.pager=cat", "-c", "core.editor=true", "-c", "core.sshCommand=false", "-c", "core.askPass=",
+		"-c", "diff.external=", "-c", "credential.helper=", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-c", "protocol.ext.allow=never"}, args...)
 	cmd := procgroup.CommandContext(ctx, "git", full...)
 	cmd.Env = append(os.Environ(),
+		"GIT_PAGER=cat", "GIT_EDITOR=true", "GIT_ASKPASS=", "GIT_SSH_COMMAND=false",
 		"GIT_AUTHOR_NAME=VibeChat", "GIT_AUTHOR_EMAIL=vibechat@localhost",
 		"GIT_COMMITTER_NAME=VibeChat", "GIT_COMMITTER_EMAIL=vibechat@localhost",
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0")

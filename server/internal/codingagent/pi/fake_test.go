@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A fake Pi: the test binary itself, started as the "node" of an Install whose entry script is fakeEntry. It speaks the
@@ -19,8 +21,11 @@ import (
 const fakeEntry = "/fake-pi/cli.js"
 
 func TestMain(m *testing.M) {
-	if len(os.Args) > 1 && os.Args[1] == fakeEntry {
-		os.Exit(fakePi(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	// argv of a Pi start: node --require <relay> <entry> flags... (the test binary plays node)
+	for i := 1; i < len(os.Args) && i < 4; i++ {
+		if os.Args[i] == fakeEntry {
+			os.Exit(fakePi(os.Args[i+1:], os.Stdin, os.Stdout, os.Stderr))
+		}
 	}
 	os.Exit(m.Run())
 }
@@ -48,7 +53,34 @@ func settled(w io.Writer, aborted bool) {
 	out(w, map[string]any{"type": "agent_settled", "aborted": aborted})
 }
 
+// fakeRelay is relay.js in Go: 127.0.0.1:VIBECHAT_GW_PORT to the Unix socket VIBECHAT_GW_SOCK.
+func fakeRelay() {
+	ln, err := net.Listen("tcp", "127.0.0.1:"+os.Getenv("VIBECHAT_GW_PORT"))
+	if err != nil {
+		return
+	}
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				u, err := net.Dial("unix", os.Getenv("VIBECHAT_GW_SOCK"))
+				if err != nil {
+					c.Close()
+					return
+				}
+				go func() { io.Copy(u, c); u.Close() }()
+				io.Copy(c, u)
+				c.Close()
+			}()
+		}
+	}()
+}
+
 func fakePi(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fakeRelay()
 	flags := map[string]string{}
 	for i := 0; i < len(argv); i++ {
 		if strings.HasPrefix(argv[i], "--") {
@@ -90,13 +122,13 @@ func fakePrompt(cmd map[string]any, msg string, flags map[string]string, br *buf
 	scenario, _, _ := strings.Cut(msg, " ")
 	switch scenario {
 	case "reject":
-		out(stdout, map[string]any{"id": id, "type": "response", "command": "prompt", "success": false, "error": "Model not found: " + os.Getenv("VIBECHAT_GATEWAY_KEY")})
+		out(stdout, map[string]any{"id": id, "type": "response", "command": "prompt", "success": false, "error": "Model not found: nope"})
 		return true
 	case "handled":
 		ok("handled")
 		return true
 	case "crash":
-		fmt.Fprintf(stderr, "boom: token %s\n", os.Getenv("VIBECHAT_GATEWAY_KEY"))
+		fmt.Fprintf(stderr, "boom: it broke\n")
 		return false
 	case "ui":
 		ok("started")
@@ -138,7 +170,22 @@ func fakePrompt(cmd map[string]any, msg string, flags map[string]string, br *buf
 		ok("started")
 		obs := map[string]any{"flags": flags}
 		env := os.Environ()
-		obs["gatewayToken"] = os.Getenv("VIBECHAT_GATEWAY_KEY")
+		obs["gatewayTokenEnv"] = os.Getenv("VIBECHAT_GATEWAY_KEY")
+		if dev, err := os.ReadFile("/proc/net/dev"); err == nil {
+			var ifs []string
+			for _, l := range strings.Split(string(dev), "\n")[2:] {
+				if n, _, ok := strings.Cut(strings.TrimSpace(l), ":"); ok {
+					ifs = append(ifs, n)
+				}
+			}
+			obs["ifaces"] = ifs
+		}
+		if lst, err := net.DialTimeout("tcp", "127.0.0.1:"+strings.TrimSpace(strings.TrimPrefix(msg, "observe")), time.Second); err == nil {
+			lst.Close()
+			obs["hostLoopbackReachable"] = true
+		} else {
+			obs["hostLoopbackReachable"] = false
+		}
 		var leaked []string
 		for _, kv := range env {
 			if strings.Contains(kv, testKey) || strings.HasPrefix(kv, "VIBECHAT_YANDEX") || strings.HasPrefix(kv, "VIBECHAT_GIGACHAT") {
@@ -172,7 +219,7 @@ func fakePrompt(cmd map[string]any, msg string, flags map[string]string, br *buf
 		_ = json.Unmarshal(raw, &base)
 		body := `{"model":"yagpt","messages":[{"role":"user","content":"ping"}]}`
 		req, _ := http.NewRequest("POST", base.Providers["vibechat"].BaseURL+"/chat/completions", strings.NewReader(body))
-		req.Header.Set("Authorization", "Bearer "+os.Getenv("VIBECHAT_GATEWAY_KEY"))
+		req.Header.Set("Authorization", "Bearer vibechat-no-key")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			obs["gatewayErr"] = err.Error()

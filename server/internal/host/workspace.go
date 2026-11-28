@@ -73,6 +73,9 @@ func (h *Host) syncBeforeRun(ctx context.Context, p store.Project, s store.Sessi
 	if s.Worktree == "" {
 		return nil
 	}
+	if err := gitx.GuardWorktree(p.Path, s.Worktree); err != nil {
+		return err
+	}
 	if err := gitx.CommitAll(ctx, p.Path, "Studio edits"); err != nil {
 		return err
 	}
@@ -96,6 +99,10 @@ func (h *Host) landRun(ctx context.Context, p store.Project, s store.Session, ti
 			return nil, err
 		}
 	} else {
+		// the agent wrote in this folder: git there must read the project's own repository, nothing the agent left
+		if err := gitx.GuardWorktree(p.Path, s.Worktree); err != nil {
+			return nil, err
+		}
 		if err := gitx.CommitAll(ctx, s.Worktree, msg); err != nil {
 			return nil, err
 		}

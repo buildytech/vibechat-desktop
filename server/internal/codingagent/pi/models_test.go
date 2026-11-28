@@ -34,7 +34,7 @@ func TestModelsJSONPointsAtTheGatewayAndHoldsNoSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := doc.Providers[ProviderID]
-	if len(doc.Providers) != 1 || p.BaseURL != "http://127.0.0.1:4555/v1" || p.API != "openai-completions" || p.APIKey != "$VIBECHAT_GATEWAY_KEY" {
+	if len(doc.Providers) != 1 || p.BaseURL != "http://127.0.0.1:4555/v1" || p.API != "openai-completions" || p.APIKey != "vibechat-no-key" {
 		t.Fatalf("%s", raw)
 	}
 	if p.Compat["supportsStore"] != false || p.Compat["supportsDeveloperRole"] != false || p.Compat["maxTokensField"] != "max_tokens" || p.Compat["supportsUsageInStreaming"] != false {

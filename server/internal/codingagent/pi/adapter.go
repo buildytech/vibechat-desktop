@@ -17,7 +17,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/buildytech/vibechat-desktop/server/internal/codingagent"
@@ -43,18 +42,16 @@ type Options struct {
 	Log    func(string)
 
 	// Test seams: the jail probe, the process grace period and a tap on every record Pi writes.
-	Jail  func() error
-	Grace time.Duration
-	Tap   func(raw []byte)
+	Jail func() error
+	// ToolJail probes the nested jail of the agent's shell (default isolate.NestedJailAvailable).
+	ToolJail func() error
+	Grace    time.Duration
+	Tap      func(raw []byte)
 }
 
 // Adapter is the Pi runtime behind codingagent.Adapter.
 type Adapter struct {
 	o Options
-
-	gwOnce sync.Once
-	gwBase string
-	gwErr  error
 }
 
 var _ codingagent.Adapter = (*Adapter)(nil)
@@ -63,6 +60,9 @@ var _ codingagent.Adapter = (*Adapter)(nil)
 func New(o Options) *Adapter {
 	if o.Log == nil {
 		o.Log = func(string) {}
+	}
+	if o.ToolJail == nil {
+		o.ToolJail = isolate.NestedJailAvailable
 	}
 	if o.Jail == nil {
 		o.Jail = isolate.JailAvailable
@@ -92,6 +92,9 @@ func (a *Adapter) Capabilities() codingagent.Capabilities {
 func (a *Adapter) Ready() error {
 	if err := a.o.Jail(); err != nil {
 		return fmt.Errorf("the Pi agent runs only in the bubblewrap jail and it is not available: %v", err)
+	}
+	if err := a.o.ToolJail(); err != nil {
+		return fmt.Errorf("the Pi agent's shell needs a nested jail without network: %v", err)
 	}
 	if a.o.LocateErr != nil {
 		return a.o.LocateErr
@@ -217,11 +220,6 @@ func (a *Adapter) Close() {
 	if a.o.Gateway != nil {
 		a.o.Gateway.Close()
 	}
-}
-
-func (a *Adapter) gateway() (string, error) {
-	a.gwOnce.Do(func() { a.gwBase, a.gwErr = a.o.Gateway.Start() })
-	return a.gwBase, a.gwErr
 }
 
 type session struct {

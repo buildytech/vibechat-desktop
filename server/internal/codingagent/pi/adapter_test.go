@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,7 +24,7 @@ func TestFakePiObservedFromInsideTheJail(t *testing.T) {
 	ws := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	c, res, err, handle := h.run(t, ctx, ws, "", "observe")
+	c, res, err, handle := h.run(t, ctx, ws, "", "observe "+portOf(h.up.URL))
 	if err != nil {
 		t.Fatalf("%v\n%s", err, h.logs.all())
 	}
@@ -44,9 +43,15 @@ func TestFakePiObservedFromInsideTheJail(t *testing.T) {
 			t.Errorf("flag %s missing: project-local code would be loaded", k)
 		}
 	}
-	token, _ := obs["gatewayToken"].(string)
-	if !strings.HasPrefix(token, "vcgw_") {
-		t.Fatalf("gateway token %q", token)
+	// no token, no secret of any kind in the jail: the gateway is a socket, the agent's key is a placeholder
+	if obs["gatewayTokenEnv"] != "" {
+		t.Fatalf("a gateway token is in the agent's environment: %v", obs["gatewayTokenEnv"])
+	}
+	if ifs, _ := obs["ifaces"].([]any); len(ifs) != 1 || ifs[0] != "lo" {
+		t.Fatalf("the jail's network namespace must hold only its own loopback: %v", obs["ifaces"])
+	}
+	if obs["hostLoopbackReachable"] != false {
+		t.Fatal("the jail reaches a port on the host's loopback")
 	}
 	if leaked, _ := obs["leakedEnv"].([]any); len(leaked) != 0 {
 		t.Fatalf("the provider key reached the jail: %v", leaked)
@@ -58,7 +63,7 @@ func TestFakePiObservedFromInsideTheJail(t *testing.T) {
 		t.Fatalf("cwd %v", obs["cwd"])
 	}
 	models, _ := obs["modelsJSON"].(string)
-	if strings.Contains(models, testKey) || strings.Contains(models, token) || !strings.Contains(models, `"$VIBECHAT_GATEWAY_KEY"`) || !strings.Contains(models, `"http://127.0.0.1:`) {
+	if strings.Contains(models, testKey) || strings.Contains(models, "vcgw_") || !strings.Contains(models, `"vibechat-no-key"`) || !strings.Contains(models, `"http://127.0.0.1:18199/v1"`) {
 		t.Fatalf("models.json: %s", models)
 	}
 	if strings.Contains(models, "gpt://") {
@@ -80,17 +85,9 @@ func TestFakePiObservedFromInsideTheJail(t *testing.T) {
 	if reqs := h.up.Requests(); len(reqs) != 1 || reqs[0].Authorization != "Api-Key "+testKey || reqs[0].Body["model"] != "gpt://folder/yandexgpt/rc" {
 		t.Fatalf("provider saw %+v", reqs)
 	}
-	// after the run: the token is dead, the agent folder is gone, the chat's session folder stays
-	gwBase := strings.TrimSuffix(strings.Split(models, `"baseUrl": "`)[1][:strings.Index(strings.Split(models, `"baseUrl": "`)[1], `"`)], "/v1")
-	req, _ := http.NewRequest("POST", gwBase+"/v1/chat/completions", strings.NewReader(`{"model":"yagpt"}`))
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != 401 {
-		t.Fatalf("a finished run's token still works: %d", resp.StatusCode)
+	// after the run: the socket is gone, the agent folder is gone, the chat's session folder stays
+	if socks, _ := filepath.Glob(filepath.Join(os.TempDir(), "vcgw-*", "gw.sock")); len(socks) != 0 {
+		t.Fatalf("a run's gateway socket is left: %v", socks)
 	}
 	if _, err := os.Stat(flags["--agent-dir"].(string)); !os.IsNotExist(err) {
 		t.Fatalf("agent folder left: %v", err)
@@ -98,7 +95,7 @@ func TestFakePiObservedFromInsideTheJail(t *testing.T) {
 	if _, err := os.Stat(flags["--session-dir"].(string)); err != nil {
 		t.Fatalf("session folder: %v", err)
 	}
-	if strings.Contains(h.logs.all(), testKey) || strings.Contains(h.logs.all(), token) {
+	if strings.Contains(h.logs.all(), testKey) {
 		t.Fatalf("log shows a credential:\n%s", h.logs.all())
 	}
 	_ = c
@@ -135,13 +132,13 @@ func TestFakePiFailures(t *testing.T) {
 	defer cancel()
 	t.Run("rejected prompt", func(t *testing.T) {
 		_, _, err, _ := h.run(t, ctx, t.TempDir(), "", "reject")
-		if err == nil || !strings.Contains(err.Error(), "pi refused the prompt: Model not found") || strings.Contains(err.Error(), "vcgw_") {
+		if err == nil || !strings.Contains(err.Error(), "pi refused the prompt: Model not found") {
 			t.Fatalf("%v", err)
 		}
 	})
 	t.Run("crash before settling", func(t *testing.T) {
 		_, _, err, _ := h.run(t, ctx, t.TempDir(), "", "crash")
-		if err == nil || !strings.Contains(err.Error(), "exited before the run finished") || !strings.Contains(err.Error(), "boom: token <gateway-token>") || strings.Contains(err.Error(), "vcgw_") {
+		if err == nil || !strings.Contains(err.Error(), "exited before the run finished") || !strings.Contains(err.Error(), "boom: it broke") {
 			t.Fatalf("%v", err)
 		}
 		if strings.Contains(h.logs.all(), "vcgw_") {
@@ -285,3 +282,5 @@ func TestMenuAndModelChecks(t *testing.T) {
 		t.Fatal("CheckWorkspace")
 	}
 }
+
+func portOf(u string) string { return u[strings.LastIndex(u, ":")+1:] }

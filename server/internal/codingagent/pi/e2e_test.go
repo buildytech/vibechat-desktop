@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -324,5 +325,70 @@ func TestE2EParallelCallsOfOneToolWithYandexIDs(t *testing.T) {
 	}
 	if results != 2 {
 		t.Fatalf("tool results sent back: %d", results)
+	}
+}
+
+// The agent's shell is a nested jail: no network of any kind (not the provider gateway, not the host's loopback, not
+// the internet), no gateway socket, no sight of Pi's process or environment, and no token or key anywhere.
+func TestE2EAgentShellHasNoNetworkAndNoGateway(t *testing.T) {
+	in := realInstall(t)
+	var hostPort string
+	h := newHarness(t, in, func(n int, req stub.Request) stub.Reply {
+		if n > 0 {
+			return stub.Reply{Text: "probed"}
+		}
+		script := `
+echo "IFACES=$(tail -n +3 /proc/net/dev | cut -d: -f1 | tr -d ' ' | tr '\n' ,)"
+(exec 3<>/dev/tcp/127.0.0.1/` + hostPort + `) 2>&1 | sed 's/^/HOSTLO: /'
+(exec 3<>/dev/tcp/127.0.0.1/18199) 2>&1 | sed 's/^/RELAY: /'
+(exec 3<>/dev/tcp/1.1.1.1/443) 2>&1 | sed 's/^/INTERNET: /'
+echo "SOCKFILES=$(find /tmp /run /var/run -name 'gw.sock' 2>/dev/null | wc -l)"
+echo "SOCKDIR=$(ls -A /tmp/vc-gw 2>&1 | wc -l)"
+echo "PIDS=$(ls /proc | grep -c '^[0-9][0-9]*$')"
+echo "ENVLEAK=$(cat /proc/[0-9]*/environ 2>/dev/null | tr '\0' '\n' | grep -c -e vcgw_ -e '^VIBECHAT_GW' -e '^PI_CODING_AGENT_DIR=' -e ` + testKey + `)"
+
+echo "END"`
+		return stub.Reply{Calls: []stub.Call{{Name: "bash", Args: map[string]any{"command": script}}}}
+	})
+	hostPort = portOf(h.up.URL)
+	t.Setenv("VIBECHAT_YANDEX_API_KEY", testKey)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	c, _, err, _ := h.run(t, ctx, t.TempDir(), "", "probe the sandbox")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, h.logs.all())
+	}
+	var out string
+	for _, w := range c.wires() {
+		if w["type"] == "tool.finished" {
+			out, _ = w["detail"].(string)
+		}
+	}
+	if !strings.Contains(out, "END") {
+		t.Fatalf("the probe did not finish: %q\n%v", out, c.wires())
+	}
+	must := func(want string) {
+		t.Helper()
+		if !strings.Contains(out, want) {
+			t.Errorf("want %q in:\n%s", want, out)
+		}
+	}
+	must("IFACES=lo,")
+	must("HOSTLO: ")
+	must("RELAY: ")
+	must("INTERNET: ")
+	for _, bad := range []string{"HOSTLO: \n", "INTERNET: \n"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("a connection was made (%q):\n%s", bad, out)
+		}
+	}
+	must("SOCKFILES=0")
+	must("SOCKDIR=0")
+	must("ENVLEAK=0")
+	if pids := regexp.MustCompile(`PIDS=(\d+)`).FindStringSubmatch(out); pids == nil || len(pids[1]) > 1 {
+		t.Errorf("the shell sees Pi's processes: %v\n%s", pids, out)
+	}
+	if strings.Contains(out, "vcgw_") || strings.Contains(out, testKey) {
+		t.Errorf("a credential in the shell's output:\n%s", out)
 	}
 }
