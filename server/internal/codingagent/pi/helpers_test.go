@@ -65,7 +65,12 @@ type harness struct {
 
 func newHarness(t *testing.T, in Install, script stub.Script, tap ...func([]byte)) *harness {
 	t.Helper()
-	up := stub.OpenAI(script)
+	return newHarnessWith(t, in, script, nil, tap...)
+}
+
+func newHarnessWith(t *testing.T, in Install, script stub.Script, stubOpts []func(*stub.Server), tap ...func([]byte)) *harness {
+	t.Helper()
+	up := stub.OpenAI(script, stubOpts...)
 	t.Cleanup(up.Close)
 	client, err := providergw.NewClient([]string{"127.0.0.1"}, "")
 	if err != nil {

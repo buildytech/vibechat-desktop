@@ -68,20 +68,7 @@ func ModelsJSON(provider, baseURL string, ms []ModelEntry, extraCompat map[strin
 	if err := ValidateModels(ms); err != nil {
 		return nil, err
 	}
-	compat := map[string]any{
-		// What a generic OpenAI-compatible endpoint behind the gateway can be trusted with: nothing OpenAI-specific.
-		"supportsStore":                               false,
-		"supportsDeveloperRole":                       false,
-		"supportsReasoningEffort":                     false,
-		"supportsStrictMode":                          false,
-		"supportsUsageInStreaming":                    true,
-		"maxTokensField":                              "max_tokens",
-		"requiresNonNullAssistantContent":             true,
-		"requiresAssistantAfterToolResult":            false,
-		"supportsMidConvoSystemMessages":              false,
-		"sendSessionAffinityHeaders":                  false,
-		"requiresReasoningContentOnAssistantMessages": false,
-	}
+	compat := baseCompat()
 	for k, v := range extraCompat {
 		compat[k] = v
 	}
@@ -118,3 +105,44 @@ func firstNonEmpty(xs ...string) string {
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// baseCompat is what a generic OpenAI-compatible endpoint behind the gateway can be trusted with: nothing
+// OpenAI-specific. A provider entry of the contour config can override single keys (ValidateCompat).
+func baseCompat() map[string]any {
+	return map[string]any{
+		"supportsStore":                               false,
+		"supportsDeveloperRole":                       false,
+		"supportsReasoningEffort":                     false,
+		"supportsStrictMode":                          false,
+		"supportsUsageInStreaming":                    true,
+		"maxTokensField":                              "max_tokens",
+		"requiresNonNullAssistantContent":             true,
+		"requiresAssistantAfterToolResult":            false,
+		"supportsMidConvoSystemMessages":              false,
+		"sendSessionAffinityHeaders":                  false,
+		"requiresReasoningContentOnAssistantMessages": false,
+	}
+}
+
+// ValidateCompat accepts only the keys of the base compat block, with a value of the same kind: a typo in the
+// contour config is an error, and the config cannot smuggle anything else into Pi's models.json.
+func ValidateCompat(extra map[string]any) error {
+	base := baseCompat()
+	for k, v := range extra {
+		b, ok := base[k]
+		if !ok {
+			return fmt.Errorf("compat key %q is not one of the supported ones", k)
+		}
+		switch b.(type) {
+		case bool:
+			if _, ok := v.(bool); !ok {
+				return fmt.Errorf("compat %q must be true or false", k)
+			}
+		case string:
+			if s, ok := v.(string); !ok || (k == "maxTokensField" && s != "max_tokens" && s != "max_completion_tokens") {
+				return fmt.Errorf("compat %q: unsupported value", k)
+			}
+		}
+	}
+	return nil
+}

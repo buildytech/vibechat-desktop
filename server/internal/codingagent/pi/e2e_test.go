@@ -270,3 +270,59 @@ func TestE2EGigaChatThroughTheTranslator(t *testing.T) {
 		t.Fatal("key in log")
 	}
 }
+
+// Yandex AI Studio gives parallel calls of one tool the same id (the function name). Through the gateway the real Pi
+// must see two distinct calls, run both, and the provider must get both results back under its own ids.
+func TestE2EParallelCallsOfOneToolWithYandexIDs(t *testing.T) {
+	in := realInstall(t)
+	h := newHarnessWith(t, in, func(n int, req stub.Request) stub.Reply {
+		if n == 0 {
+			return stub.Reply{Calls: []stub.Call{
+				{Name: "write", Args: map[string]any{"path": "a.txt", "content": "A\n"}},
+				{Name: "write", Args: map[string]any{"path": "b.txt", "content": "B\n"}}}}
+		}
+		return stub.Reply{Text: "both written"}
+	}, []func(*stub.Server){stub.NameAsID})
+	ws := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	c, res, err, _ := h.run(t, ctx, ws, "", "write two files")
+	if err != nil || res.Error != "" || res.ToolCalls != 2 {
+		t.Fatalf("%v %+v", err, res)
+	}
+	for f, want := range map[string]string{"a.txt": "A\n", "b.txt": "B\n"} {
+		if got, _ := os.ReadFile(filepath.Join(ws, f)); string(got) != want {
+			t.Fatalf("%s: %q", f, got)
+		}
+	}
+	ids := map[string]bool{}
+	for _, w := range c.wires() {
+		if w["type"] == "tool.started" {
+			ids[w["callId"].(string)] = true
+		}
+	}
+	if len(ids) != 2 {
+		t.Fatalf("the two calls must have distinct ids: %v", ids)
+	}
+	sent := h.up.Requests()[1].Body["messages"].([]any)
+	results := 0
+	for _, m := range sent {
+		msg := m.(map[string]any)
+		if msg["role"] == "tool" {
+			results++
+			if msg["tool_call_id"] != "write" {
+				t.Fatalf("the provider must get its own id back: %v", msg["tool_call_id"])
+			}
+		}
+		if calls, ok := msg["tool_calls"].([]any); ok {
+			for _, tc := range calls {
+				if tc.(map[string]any)["id"] != "write" {
+					t.Fatalf("assistant call id: %v", tc)
+				}
+			}
+		}
+	}
+	if results != 2 {
+		t.Fatalf("tool results sent back: %d", results)
+	}
+}

@@ -64,7 +64,7 @@ func contourChecks(p paths) []check {
 	if name == "" {
 		name = "custom"
 	}
-	cs := []check{ok("contour", fmt.Sprintf("%s: runtime pi, provider %s (%s)", name, c.Provider, p.contourFile()))}
+	cs := []check{ok("contour", fmt.Sprintf("%s: runtime pi, provider %s (%s)", name, c.ProviderName(), p.contourFile()))}
 	if err := isolate.JailAvailable(); err != nil {
 		cs = append(cs, bad("pi jail", "Pi runs only in bubblewrap: "+err.Error()))
 	} else {
@@ -89,7 +89,7 @@ func contourChecks(p paths) []check {
 	if err := prov.Ready(); err != nil {
 		cs = append(cs, warn("pi provider", err.Error()+" (the key is read from the service's environment; run doctor with it to check)"))
 	} else {
-		cs = append(cs, ok("pi provider", c.Provider+": key present in this environment"))
+		cs = append(cs, ok("pi provider", c.ProviderName()+": key present in this environment"))
 	}
 	cs = append(cs, ok("egress", "open only: "+strings.Join(prov.Hosts(), ", ")))
 	return cs

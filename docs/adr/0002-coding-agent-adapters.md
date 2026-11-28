@@ -105,6 +105,31 @@ server/cmd/fetch-pi/                    download (or -tarball), verify, install;
 5. **Git in a worktree chat.** The worktree's `.git` file points into the project folder, which is hidden in the jail, so `git` inside Pi's shell may not work there; the host lands and commits the worktree itself. To be checked live.
 6. **Windows and macOS** have no jail: Pi is Linux-only by design (Ready fails closed elsewhere).
 
+## Step 3: providers as data, live findings (2026-11-28)
+
+**Providers are data.** Besides the `yandex` and `gigachat` presets, `contour.json` takes `"provider": "openai"` with an
+`openai` block: `id` (menu prefix), `baseUrl`, `keyEnv` (the environment variable that holds the key, `VIBECHAT_<NAME>_KEY`,
+or `noKey`), `auth` (`header`, `scheme`: Bearer by default, `Api-Key`, `none` = the bare key), fixed `headers` (no
+secrets; `Authorization`, `Cookie`, `Host` ... are refused), `quirks` (`uniqueToolCallIds`), `compat` (single keys of Pi's
+models.json compat block, allow-listed and type-checked), `caFile` and `models`. A new OpenAI-compatible provider (OpenRouter,
+gpt-oss-120b on a Russian cloud, a vLLM gateway) is one such block, no code; egress is the block's host only. Yandex is now a
+preset of the same `providergw.OpenAICompat` (Api-Key, `OpenAI-Project`, logging off, `uniqueToolCallIds`).
+
+**Yandex quirk, handled and tested:** Yandex answers every tool call with the function name as its id, so two parallel calls of one
+tool collide. The gateway rewrites ids on the way out to `vc<8 hex>_<index>_<original>` (plain answer and SSE stream; the same index keeps
+its id inside a stream) and puts the original back on the next request (assistant `tool_calls` and `role: tool` messages). It is
+stateless (the original is inside the id), so a resumed chat works; requests without tool history stay byte for byte.
+Tests: gateway (plain and stream, restore, untouched ids, numbers beyond 2^53 preserved) and a real Pi with parallel same-name calls.
+Other observed Yandex facts: content starts with a space; tool calls stream whole in one chunk; usage chunk has empty `choices`;
+model names in answers omit the folder. Live (Alice AI LLM Flash, a few calls, before the owner moved the pilot to OpenRouter): a
+Python edit/write with apostrophes in the arguments made the model emit `\'` (invalid JSON) and Yandex ended the stream with
+`Stream error`; with double quotes the three-step task (write, edit, bash) passed. Yandex is no longer called by the pilot.
+
+**Live pilot provider: OpenRouter** (`https://openrouter.ai/api/v1`, `openai/gpt-oss-120b`, key `VIBECHAT_OPENROUTER_KEY`): real Pi
+through the gateway, three steps in one resumed chat (write a file, edit it, run it with bash): all tool calls were made with unique
+ids, the file ends as asked and `python3 hello.py` prints the new text; Pi's thinking deltas map to `thinking.*` events.
+`TestLiveCodingTask` (`VIBECHAT_LIVE=1`, off by default) repeats it against any provider.
+
 ## RU contour spike: GigaChat vs Yandex AI Studio (from official docs, no API calls, no keys used)
 
 What Pi needs from a provider (Pi docs, `models.json`): `baseUrl`, `"api": "openai-completions"` (or `openai-responses`), `apiKey` as a literal, `$ENV` or `!command` (run at request time, not cached), headers with the same interpolation. Coding needs OpenAI-style `tools` / `tool_calls` and SSE streaming.

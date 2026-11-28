@@ -43,7 +43,7 @@ func TestValidation(t *testing.T) {
 		"key inside the block":           {`{"runtime":"pi","provider":"yandex","yandex":{"folderId":"f","apiKey":"x","models":[{"id":"a"}]}}`, "unknown field"},
 		"unknown runtime":                {`{"runtime":"openrouter"}`, "unknown runtime"},
 		"pi without provider":            {`{"runtime":"pi"}`, `needs "provider"`},
-		"unknown provider":               {`{"runtime":"pi","provider":"openai"}`, "unknown provider"},
+		"unknown provider":               {`{"runtime":"pi","provider":"anthropic"}`, "unknown provider"},
 		"provider without its block":     {`{"runtime":"pi","provider":"yandex"}`, `needs a "yandex" block`},
 		"two providers":                  {`{"runtime":"pi","provider":"yandex","yandex":{"folderId":"f","models":[{"id":"a"}]},"gigachat":{"scope":"GIGACHAT_API_PERS","models":[{"id":"a"}]}}`, "one provider only"},
 		"cursor with a provider":         {`{"runtime":"cursor-sdk","provider":"yandex"}`, "takes no provider"},

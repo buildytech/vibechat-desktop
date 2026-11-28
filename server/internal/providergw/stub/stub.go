@@ -47,6 +47,9 @@ type Server struct {
 	reqs   []Request
 	// TokenCalls counts OAuth token requests (GigaChat stub).
 	TokenCalls int
+	// NameAsID makes the OpenAI stub answer tool calls the way Yandex AI Studio does: id == function name (not unique),
+	// every streamed call whole in one chunk with its index.
+	NameAsID bool
 	// TokenTTL is how long an issued token lives (GigaChat stub); 0 = 30 minutes.
 	TokenTTL time.Duration
 	tokens   map[string]time.Time
@@ -90,9 +93,15 @@ func (s *Server) callID(i int) string {
 	return fmt.Sprintf("call_%d_%d", n, i)
 }
 
+// NameAsID is an option of OpenAI: the Yandex tool-call id quirk.
+func NameAsID(s *Server) { s.NameAsID = true }
+
 // OpenAI starts an OpenAI-compatible provider (POST /v1/chat/completions).
-func OpenAI(script Script) *Server {
+func OpenAI(script Script, opts ...func(*Server)) *Server {
 	s := &Server{script: script}
+	for _, o := range opts {
+		o(s)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		req, n, stream := s.record(r)
@@ -107,7 +116,11 @@ func OpenAI(script Script) *Server {
 		var calls []any
 		for i, c := range rep.Calls {
 			args, _ := json.Marshal(c.Args)
-			calls = append(calls, map[string]any{"index": i, "id": s.callID(i), "type": "function", "function": map[string]any{"name": c.Name, "arguments": string(args)}})
+			id := s.callID(i)
+			if s.NameAsID {
+				id = c.Name
+			}
+			calls = append(calls, map[string]any{"index": i, "id": id, "type": "function", "function": map[string]any{"name": c.Name, "arguments": string(args)}})
 		}
 		finish := "stop"
 		if len(calls) > 0 {
@@ -145,6 +158,10 @@ func OpenAI(script Script) *Server {
 			cm := c.(map[string]any)
 			f := cm["function"].(map[string]any)
 			args := f["arguments"].(string)
+			if s.NameAsID {
+				send(chunk(map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"index": cm["index"], "id": cm["id"], "type": "function", "function": map[string]any{"name": f["name"], "arguments": args}}}}, nil))
+				continue
+			}
 			half := len(args) / 2
 			send(chunk(map[string]any{"tool_calls": []any{map[string]any{"index": cm["index"], "id": cm["id"], "type": "function", "function": map[string]any{"name": f["name"], "arguments": args[:half]}}}}, nil))
 			send(chunk(map[string]any{"tool_calls": []any{map[string]any{"index": cm["index"], "function": map[string]any{"arguments": args[half:]}}}}, nil))
